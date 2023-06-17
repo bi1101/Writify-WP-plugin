@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Writify
  * Description:       Score IELTS Essays x GPT
- * Version:           1.0.2
+ * Version:           1.0.2 For Edu
  * Copyright: © 2023-2026 RLT
  */
 
@@ -103,11 +103,6 @@ function writify_ajax_calls()
             /* text-overflow: ellipsis; */
             transition-duration: .2s;
             /* white-space: normal; */
-        }
-
-        span.improved-vocab:hover {
-            background: #02289e;
-            cursor: pointer;
         }
 
         mark {
@@ -220,52 +215,9 @@ function writify_ajax_calls()
                         }
                     });
 
-                    // Add click event listener to the .improved-vocab elements
-                    $newDiv.find(".improved-vocab").on('click', function (event) {
-                        event.stopPropagation(); // Prevent the event from bubbling up to the document
-
-                        // Extract the original vocab from the updated text
-                        const originalVocabMatch = updatedText.match(/<span class="original-vocab">(.*?)<\/span><span class="arrow">-\><\/span>/);
-                        if (originalVocabMatch) {
-                            const originalVocab = originalVocabMatch[1];
-
-                            // Extract the improved vocab from the clicked element
-                            const improvedVocab = jQuery(this).text();
-
-                            // Get the text in the #my-text div and remove the <mark> tags
-                            const myText = $myTextDiv.html();
-                            const unmarkedText = myText.replace(/<mark>(.*?)<\/mark>/g, "$1");
-
-                            // Escape any special characters in the original vocab
-                            const escapedOriginalVocab = originalVocab.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-                            // Replace the original vocab with the improved vocab in the unmarked text and make the improved vocab bold
-                            const updatedText = unmarkedText.replace(new RegExp(escapedOriginalVocab, "gi"), `<b>${improvedVocab}</b>`);
-                            $myTextDiv.html(updatedText);
-
-                            // Make the li.upgrade_vocab element disappear with a fade out animation
-                            jQuery(this).closest(".upgrade_vocab").fadeOut();
-                        }
-                    });
                 }
             });
         }
-
-        // Add click event listener to the #accept_all button
-        jQuery("#accept_all").on('click', function () {
-            // Trigger the click event on all li.upgrade_vocab elements
-            jQuery("div.improved-vocab").click();
-        });
-
-        // Add a click event listener to the document
-        $document.on('click', function () {
-            // Hide the arrow, improved vocab, explanation, and show the short explanation of all list items with the "upgrade_vocab" class
-            jQuery(".upgrade_vocab").find(".arrow, .or, .improved - vocab, .explanation").hide();
-            jQuery(".upgrade_vocab").find(".short-explanation").show();
-
-            // Remove the "expanded" class from all list items with the "upgrade_vocab" class
-            jQuery(".upgrade_vocab").removeClass("expanded");
-        });
 
     </script>
     <script>
