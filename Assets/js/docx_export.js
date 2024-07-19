@@ -1,6 +1,6 @@
 /**
  * Script Name: Docx Export
- * Version: 1.0.7
+ * Version: 1.0.8
  * Last Updated: 16-5-2024
  * Author: bi1101
  * Description: Export the result page as docx files with comments.
@@ -65,6 +65,13 @@ function createSectionsWithComments(rawComments) {
     const validComments = rawComments.filter(comment => 
         essayText.toLowerCase().includes(comment.originalVocab.toLowerCase())
     );
+
+    // Reorder comment array based on the position of the original vocab in the essay
+    validComments.sort((a, b) => {
+        const aIndex = essayText.toLowerCase().indexOf(a.originalVocab.toLowerCase());
+        const bIndex = essayText.toLowerCase().indexOf(b.originalVocab.toLowerCase());
+        return aIndex - bIndex;
+    });
 
     // Add the essay prompt paragraphs to the output
     for (let promptParagraph of essayPromptParagraphs) {
