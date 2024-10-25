@@ -1043,6 +1043,11 @@ function event_stream_openai(WP_REST_Request $request)
 
     if (!headers_sent()) {
         @ini_set("zlib.output_compression", 0);
+        
+        // Clear all output buffers
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
         ob_implicit_flush(true);
         ob_end_flush();
 
