@@ -1,7 +1,7 @@
 /**
  * Script Name: Docx Export
- * Version: 1.1.2
- * Last Updated: 04-8-2024
+ * Version: 1.1.6
+ * Last Updated: 29-8-2024
  * Author: bi1101
  * Description: Export the result page as docx files with comments.
  */
@@ -30,7 +30,7 @@ function extractRawCommentsFromHTML() {
     });
 
     // Filter out faulty comments before processing
-    const validComments = rawComments.filter(comment => 
+    const validComments = rawComments.filter(comment =>
         essayText.includes(comment.originalVocab.toLowerCase())
     );
 
@@ -50,6 +50,31 @@ function extractRawCommentsFromHTML() {
 
     return uniqueComments;
 }
+
+// Function to format the comments and copy to clipboard
+function copyComments() {
+    const comments = extractRawCommentsFromHTML();
+    let formattedComments = "";
+
+    comments.forEach((comment, index) => {
+        formattedComments += `${index + 1}. [${comment.originalVocab}] -> [${comment.improvedVocab}]\n`;
+        formattedComments += `Explanation: ${comment.explanation}\n\n`;
+    });
+
+    // Copy formatted comments to clipboard
+    navigator.clipboard.writeText(formattedComments).then(() => {
+        alert("Comments copied to clipboard!");
+    }).catch(err => {
+        console.error("Could not copy text: ", err);
+    });
+}
+
+// Event Listener
+document.addEventListener("DOMContentLoaded", function () {
+    document.getElementById("copyComment").addEventListener("click", function () {
+        copyComments();
+    });
+});
 
 function convertRawCommentsToDocxFormat(rawComments) {
     // Use the passed user data
@@ -87,7 +112,7 @@ function createSectionsWithComments(rawComments) {
     const outputParagraphs = [];
 
     // Filter out faulty comments before processing
-    const validComments = rawComments.filter(comment => 
+    const validComments = rawComments.filter(comment =>
         essayText.toLowerCase().includes(comment.originalVocab.toLowerCase())
     );
 
@@ -175,11 +200,71 @@ function createNormalSections(className) {
             } else if (child.tagName === "OL" || child.tagName === "UL") {
                 // For ordered or unordered lists
                 sections.push(...bulletPointsToDocx(child.outerHTML));
+            } else if (child.tagName === "TABLE") {
+                // For table tags
+                sections.push(convertTableToDocx(child));
             }
         }
     });
 
     return sections;
+}
+
+function convertTableToDocx(tableElement) {
+    if (!tableElement) {
+        return null;
+    }
+
+    const rows = [];
+
+    // Helper function to create a TableCell
+    const createTableCell = (text, isHeader = false) => {
+        return new docx.TableCell({
+            children: [
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: text,
+                            bold: isHeader, // Bold text for header cells
+                        })
+                    ]
+                })
+            ],
+        });
+    };
+
+    // Helper function to process rows
+    const processRows = (rowElements, isHeader = false) => {
+        return Array.from(rowElements).map((row) => {
+            const cells = Array.from(row.querySelectorAll("th, td")).map((cell) => {
+                const cellText = cell?.innerText?.trim() || "N/A";
+                return createTableCell(cellText, isHeader);
+            });
+            return new docx.TableRow({
+                children: cells,
+                tableHeader: isHeader,
+                cantSplit: true // Prevents row from splitting across pages
+            });
+        });
+    };
+
+    // Process thead rows (header rows)
+    const thead = tableElement.querySelector("thead");
+    if (thead) {
+        const headerRows = processRows(thead.querySelectorAll("tr"), true);
+        rows.push(...headerRows);
+    }
+
+    // Process tbody rows (body rows)
+    const tbody = tableElement.querySelector("tbody") || tableElement;
+    const bodyRows = processRows(tbody.querySelectorAll("tr"));
+    rows.push(...bodyRows);
+
+    // Create and return the table
+    return new docx.Table({
+        rows,
+        width: { type: docx.WidthType.AUTO }
+    });
 }
 
 function htmlParagraphToDocx(htmlContent) {
@@ -330,6 +415,7 @@ async function exportDocument(saveBlob = true) {
     let lrH = document.getElementsByClassName("lr_header")[0]?.innerText;
     let grH = document.getElementsByClassName("gra_header")[0]?.innerText;
     let shH = document.getElementsByClassName("sample_header")[0]?.innerText;
+    let svcabH = document.getElementsByClassName("sugvocab_header")[0]?.innerText;
 
     // Generating sections
     const sectionsChildren = [];
@@ -364,6 +450,10 @@ async function exportDocument(saveBlob = true) {
         sectionsChildren.push(createHeaderParagraph(shH));
         sectionsChildren.push(...createNormalSections("sample_response"));
     }
+    if (svcabH) {
+        sectionsChildren.push(createHeaderParagraph(svcabH));
+        sectionsChildren.push(...createNormalSections("sugvocab_response"));
+    }
 
     const doc = new docx.Document({
         title: "Result", // Adjust as needed
@@ -381,17 +471,17 @@ async function exportDocument(saveBlob = true) {
 
     // Convert the document to a blob and save it
     generatedBlob = await docx.Packer.toBlob(doc);
-    if(saveBlob == true){
+    if (saveBlob == true) {
         saveBlobAsDocx(generatedBlob);
     }
 }
 
-    async function getGeneratedBlob() {
-        if(!generatedBlob){
-            await exportDocument(false);
-        }
-        return generatedBlob;
+async function getGeneratedBlob() {
+    if (!generatedBlob) {
+        await exportDocument(false);
     }
+    return generatedBlob;
+}
 
 function createHeaderParagraph(text) {
     const { Paragraph, TextRun, HeadingLevel } = docx;
