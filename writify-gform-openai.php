@@ -92,19 +92,324 @@ function writify_register_routes()
             // If you want to restrict access, modify this
         )
     );
+    
+    // Register the save-pronun-error route
+    register_rest_route(
+        'writify/v1',
+        '/save-pronun-error/',
+        array(
+            'methods' => 'POST',
+            'callback' => 'save_pronun_error',
+            'permission_callback' => '__return_true',
+            'args' => array(
+                'formId' => array(
+                    'required' => true,
+                    'validate_callback' => function($param) {
+                        return is_numeric($param);  // Ensure formId is numeric
+                    },
+                ),
+                'entryId' => array(
+                    'required' => true,
+                    'validate_callback' => function($param) {
+                        return is_numeric($param);  // Ensure entryId is numeric
+                    },
+                ),
+            ),
+        )
+    );
+    // Register the save-fluency-errors route
+    register_rest_route(
+        'writify/v1',
+        '/save-fluency-errors/',
+        array(
+            'methods' => 'POST',
+            'callback' => 'save_fluency_errors',
+            'permission_callback' => '__return_true',
+            'args' => array(
+                'formId' => array(
+                    'required' => true,
+                    'validate_callback' => function($param) {
+                        return is_numeric($param);  // Ensure formId is numeric
+                    },
+                ),
+                'entryId' => array(
+                    'required' => true,
+                    'validate_callback' => function($param) {
+                        return is_numeric($param);  // Ensure entryId is numeric
+                    },
+                ),
+            ),
+        )
+    );
+
+
+    // Register the delete-pronun-error route
+    register_rest_route(
+        'writify/v1',
+        '/delete-pronun-error/',
+        array(
+            'methods' => 'POST',
+            'callback' => 'delete_pronun_error',
+            'permission_callback' => '__return_true', 
+            'args' => array(
+                'formId' => array(
+                    'required' => true,
+                    'validate_callback' => function($param) {
+                        return is_numeric($param);  // Ensure formId is numeric
+                    },
+                ),
+                'entryId' => array(
+                    'required' => true,
+                    'validate_callback' => function($param) {
+                        return is_numeric($param);  // Ensure entryId is numeric
+                    },
+                ),
+                'errorId' => array(
+                    'required' => true,
+                    'validate_callback' => function($param) {
+                        return is_numeric($param);  // Ensure errorId is numeric
+                    },
+                ),
+            ),
+        )
+    );
 }
 add_action('rest_api_init', 'writify_register_routes');
+// Callback function for save-pronun-error
+function save_pronun_error($data) {
+    $formId = sanitize_text_field($data['formId']);
+    $entryId = sanitize_text_field($data['entryId']);
+    $pronunErrorObj = $data->get_param('pronunErrorObj'); // Get the sent pronunErrorObj
+    $form = GFAPI::get_form($formId);
+    $entry = GFAPI::get_entry($entryId);
+    $GWiz_GF_OpenAI_Object = new GWiz_GF_OpenAI();
+    $feeds = writify_get_feeds($formId);
+    $pronunFeed = null;
+
+    // Find the correct pronunciation feed
+    foreach ($feeds as $feed) {
+        if ($feed['meta']['endpoint'] == 'pronunciation') {
+            $pronunFeed = $feed;
+            break;
+        }
+    }
+
+    // If we have a valid feed
+    if ($pronunFeed) {
+        $pronun_field_id = rgar($pronunFeed['meta'], 'pronunciation_map_result_to_field');
+        
+        // Get the stored formated response data for the entry
+        $formatedResponse = gform_get_meta($entry['id'], "formated_pronunciation_response_".$feed['id']);
+        
+        // If no previous data, create an empty array
+        if(!$formatedResponse){
+            $formatedResponse = [];
+        }
+
+        // Add the new pronunciation error to the formatedResponse array
+        $formatedResponse[] = $pronunErrorObj;
+
+        // Update the meta with the new formatedResponse array
+        gform_update_meta($entry['id'], 'formated_pronunciation_response_' . $feed['id'], $formatedResponse);
+
+        // Initialize a new variable to store the human-readable content
+        $newText = '';
+
+        // Loop through each entry in the formatedResponse array and convert to human-readable format
+        foreach ($formatedResponse as $response) {
+            $humanReadable = sprintf(
+                "Start: %s\nEnd: %s\nText: %s\nCorrect Pronunciation: %s\nPhonetic: %s\n\n",
+                $response['start'],
+                $response['end'],
+                $response['text'],
+                $response['correctPronunAudio'],
+                $response['correctPhonetic']
+            );
+            $newText .= $humanReadable; // Append each formatted entry
+        }
+
+        // Save the updated human-readable text back to the entry field (clear field first)
+        $entry[$pronun_field_id] = '';  // Clear the field
+        $GWiz_GF_OpenAI_Object->maybe_save_result_to_field($pronunFeed, $entry, $form, $newText);  // Save the new text
+
+        // Return success response with the updated text
+        return rest_ensure_response(array(
+            'status' => 'success',
+            'message' => 'Pronunciation error saved',
+            'text' => $newText,
+        ));
+    } else {
+        return new WP_Error('feed_not_found', 'Pronunciation feed not found', array('status' => 404));
+    }
+}
+
+// Callback function for save-fluency-errors
+function save_fluency_errors($data) {
+    $formId = sanitize_text_field($data['formId']);
+    $entryId = sanitize_text_field($data['entryId']);
+    $fluencyErrors = $data->get_param('fluencyErrors'); // Get the fluency errors array
+    $form = GFAPI::get_form($formId);
+    $entry = GFAPI::get_entry($entryId);
+    $GWiz_GF_OpenAI_Object = new GWiz_GF_OpenAI();
+    $feeds = writify_get_feeds($formId);
+    $pronunFeed = null;
+
+    // Find the correct pronunciation feed
+    foreach ($feeds as $feed) {
+        if ($feed['meta']['endpoint'] == 'pronunciation') {
+            $pronunFeed = $feed;
+            break;
+        }
+    }
+
+    // If we have a valid feed
+    if ($pronunFeed) {
+        $fluency_field_id = rgar($pronunFeed['meta'], 'fluency_errors_field');
+
+        // Update the meta with the new fluency response array
+        gform_update_meta($entry['id'], 'fluency_errors_' . $feed['id'], $fluencyErrors);
+
+        // Initialize a new variable to store the human-readable content
+        $newText = '';
+
+        // Loop through each fluency error in the array and convert to human-readable format
+        foreach ($fluencyErrors as $error) {
+            $humanReadable = sprintf(
+                "Word Before Error Word: %s\nError Word: %s\nPause Error: %s\n\n",
+                $error['previousWord'],
+                $error['currentPronunWord'],
+                $error['pauseError'],
+            );
+            $newText .= $humanReadable; // Append each formatted entry
+        }
+
+        // Save the updated human-readable text back to the entry field (clear field first)
+        $entry[$fluency_field_id] = '';  // Clear the field
+        if (!is_numeric($fluency_field_id)) {
+			$GWiz_GF_OpenAI_Object->log_debug("No field mapped to save the Fluency Errors.");
+		}
+        $field = GFAPI::get_field($form, (int) $fluency_field_id);
+
+        if (rgar($field, 'useRichTextEditor')) {
+			$newText = wp_kses_post($newText); // Allow only certain HTML tags
+		} else {
+			// Convert <br> tags to line breaks
+			if (!is_array($newText)) {
+				$newText = htmlspecialchars_decode($newText); // Decode any HTML entities
+				$newText = preg_replace('/<br\s*\/?>/i', "\n", $newText); // Convert <br> to \n
+				$newText = wp_strip_all_tags($newText); // Remove all HTML tags
+			}
+		}
+        $entry[$fluency_field_id] = $newText;
+        $GWiz_GF_OpenAI_Object->log_debug("Processed text to save in field: " . $newText);
+		$updated = GFAPI::update_entry_field($entry['id'], $fluency_field_id, $newText);
+
+        $GWiz_GF_OpenAI_Object->log_debug("Fluency Field Updated:  " . $fluency_field_id . ", Successfull: " . print_r($updated,true));
+        GFAPI::add_note(
+            $entry["id"],
+            0,
+            "Fluency Errors: ",
+            $newText
+        );
+        $GWiz_GF_OpenAI_Object->log_debug("Entry field updated. Field ID: " . $fluency_field_id . ", Text: " . $newText);
+        gf_do_action(array('gf_openai_post_save_result_to_field', $form['id']), $newText);
+        
+        $saved_fluency_data = gform_get_meta($entry['id'], 'fluency_errors_' . $feed['id']);
+        // Return success response with the updated text
+        return rest_ensure_response(array(
+            'status' => 'success',
+            'message' => 'Fluency errors saved',
+            'text' => $saved_fluency_data,
+        ));
+    } else {
+        return new WP_Error('feed_not_found', 'Pronunciation feed not found', array('status' => 404));
+    }
+}
+
+// Callback function for delete-pronun-error
+function delete_pronun_error($data) {
+    $formId = sanitize_text_field($data['formId']);
+    $entryId = sanitize_text_field($data['entryId']);
+    $errorId = sanitize_text_field($data['errorId']); // Get the error ID to delete
+
+    $form = GFAPI::get_form($formId);
+    $entry = GFAPI::get_entry($entryId);
+    $GWiz_GF_OpenAI_Object = new GWiz_GF_OpenAI();
+    $feeds = writify_get_feeds($formId);
+    $pronunFeed = null;
+
+    // Find the correct pronunciation feed
+    foreach ($feeds as $feed) {
+        if ($feed['meta']['endpoint'] == 'pronunciation') {
+            $pronunFeed = $feed;
+            break;
+        }
+    }
+
+    // If we have a valid feed
+    if ($pronunFeed) {
+        $pronun_field_id = rgar($pronunFeed['meta'], 'pronunciation_map_result_to_field');
+
+        // Get the stored formatedResponse from the meta
+        $formatedResponse = gform_get_meta($entry['id'], "formated_pronunciation_response_".$feed['id']);
+
+        // If the formatedResponse exists
+        if ($formatedResponse) {
+            // Find and remove the specific error based on errorId
+            foreach ($formatedResponse as $index => $response) {
+                if ($response['errorId'] == $errorId) {
+                    unset($formatedResponse[$index]); // Remove the matching entry
+                    break;
+                }
+            }
+
+            // Re-index the array after removing the item
+            $formatedResponse = array_values($formatedResponse);
+
+            // Update the meta with the new formatedResponse array
+            gform_update_meta($entry['id'], 'formated_pronunciation_response_' . $feed['id'], $formatedResponse);
+
+            // Rebuild the human-readable text from the updated formatedResponse
+            $updatedText = '';
+            foreach ($formatedResponse as $response) {
+                $humanReadable = sprintf(
+                    "Start: %s\nEnd: %s\nText: %s\nCorrect Pronunciation: %s\nPhonetic: %s\n\n",
+                    $response['start'],
+                    $response['end'],
+                    $response['text'],
+                    $response['correctPronunAudio'],
+                    $response['correctPhonetic']
+                );
+                $updatedText .= $humanReadable; // Append each formatted entry
+            }
+
+            // Save the updated text back to the entry field (clear and save new value)
+            $entry[$pronun_field_id] = '';  // Clear the field
+            $GWiz_GF_OpenAI_Object->maybe_save_result_to_field($pronunFeed, $entry, $form, $updatedText);
+
+            return rest_ensure_response(array(
+                'status' => 'success',
+                'message' => "Error ID $errorId removed",
+                'updatedText' => $updatedText,
+            ));
+        } else {
+            return new WP_Error('no_errors_found', 'No pronunciation errors found to delete', array('status' => 404));
+        }
+    } else {
+        return new WP_Error('feed_not_found', 'Pronunciation feed not found', array('status' => 404));
+    }
+}
 
 add_action("wp_footer", "writify_enqueue_scripts_footer", 9999);
+
 function writify_enqueue_scripts_footer()
 {
     global $post;
     $slug = $post->post_name;
+    $gf_speaking_result_page_id = 9944;
 
     // Check if the page slug begins with "result" or "speaking-result"
-
-    // I think There is no need to check strpos($slug, 'result') !== 0 if we are checking 'speaking-result' with && operator
-    if (strpos($slug, 'result') !== 0 && strpos($slug, 'speaking-result') !== 0) {
+    if (strpos($slug, 'result') !== 0 && strpos($slug, 'speaking-result') !== 0 || $post->ID == $gf_speaking_result_page_id) {
         return;
     }
 
@@ -119,7 +424,6 @@ function writify_enqueue_scripts_footer()
     // Instantiate GWiz_GF_OpenAI object and log the nonce
     $GWiz_GF_OpenAI_Object = new GWiz_GF_OpenAI();
     $GWiz_GF_OpenAI_Object->log_debug("Created nonce in footer: " . $nonce);
-
     ?>
     <script>
         var div_index = 0, div_index_str = '';
@@ -131,10 +435,21 @@ function writify_enqueue_scripts_footer()
         const entryId = <?php echo json_encode($entry_id); ?>;
         // Include the nonce in the source URL
         const nonce = "<?php echo $nonce; ?>";
-        const sourceUrl = `/wp-json/writify/v1/event_stream_openai?form_id=${formId}&entry_id=${entryId}&_wpnonce=${nonce}`;
-
+        const sourceUrl = `<?php echo rest_url(); ?>writify/v1/event_stream_openai?form_id=${formId}&entry_id=${entryId}&_wpnonce=${nonce}`
+        console.log(nonce);
         const source = new EventSource(sourceUrl);
-        source.onmessage = function (event) {
+        source.addEventListener('message', handleEventStream);
+        source.addEventListener('whisper', handleEventStream);
+        source.addEventListener('chat/completions', handleEventStream);
+        source.addEventListener('languagetool', handleEventStream);
+
+        source.onerror = function (event) {
+            div_index = 0;
+            source.close();
+            jQuery('.error_message').css('display', 'flex');
+        };
+
+        function handleEventStream(event) {
             if (event.data == "[ALLDONE]") {
                 source.close();
             } else if (event.data.startsWith("[DIVINDEX-")) {
@@ -198,19 +513,14 @@ function writify_enqueue_scripts_footer()
                     current_div.html(html); // Replace the current HTML content with the processed markdown
                 }
             }
-        };
-        source.onerror = function (event) {
-            div_index = 0;
-            source.close();
-            jQuery('.error_message').css('display', 'flex');
-        };
+        }
 
     </script>
     <?php
 }
 
 /**
- * Enqueues necessary scripts and styles based on the current post slug.
+ * Enqueues necessary scripts and styles For Different Result Pages.
  *
  * @return void
  */
@@ -218,108 +528,96 @@ function writify_enqueue_scripts()
 {
     // Get current post
     global $post;
+    $gf_speaking_result_page_id = 9944; // ID of Speaking Result Page For Gravity Forms
     // Initialize GF OPEN AI OBJECT
     $GWiz_GF_OpenAI_Object = new GWiz_GF_OpenAI();
-    $settings = $this->get_plugin_settings();
+    $settings = $GWiz_GF_OpenAI_Object->get_plugin_settings();
 
-    // Check if we're inside a post and get the slug
+    // Check if we're inside a post
     if (is_a($post, 'WP_Post')) {
         $slug = $post->post_name;
 
-        // Enqueue the script only if the slug starts with 'result'
-        if (substr($slug, 0, 6) === 'result') {
-            wp_enqueue_script('writify-docx-export', plugin_dir_url(__FILE__) . 'Assets/js/docx_export.js', array('jquery'), '1.1.2', true);
-            // Enqueue Docx script
-            wp_enqueue_script('docx', 'https://unpkg.com/docx@8.0.0/build/index.js', array(), null, true);
-            // Enqueue FileSaver script
-            wp_enqueue_script('file-saver', 'https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/1.3.8/FileSaver.js', array(), null, true);
+        // General Scripts
+        wp_enqueue_script('docx', 'https://unpkg.com/docx@8.0.0/build/index.js', array(), null, true);
+        wp_enqueue_script('file-saver', 'https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/1.3.8/FileSaver.js', array(), null, true);
+        wp_enqueue_script('remarkable', 'https://cdn.jsdelivr.net/remarkable/1.7.1/remarkable.min.js', array(), null, true);
+        wp_enqueue_script('google-client', 'https://accounts.google.com/gsi/client', array(), null, true);
+        wp_enqueue_script('google-api', 'https://apis.google.com/js/api.js?onload=onApiLoad', array(), null, true);
 
-            // Get current user's data
-            $current_user = wp_get_current_user();
-            $primary_identifier = get_user_primary_identifier();
 
-            // Modify the user's name if they are a subscriber or have no membership
-            $firstName = $current_user->user_firstname;
-            $lastName = $current_user->user_lastname;
-            if ($primary_identifier == 'No_membership' || $primary_identifier == 'subscriber' || $primary_identifier == 'Writify-plus' || $primary_identifier == 'plus_subscriber') {
-                $lastName .= " from IELTS Science"; // Add "from IELTS Science" to the last name
-            }
+        // Enqueue scripts specifically for Speaking Result Page (based on page ID)
+        if ($post->ID == $gf_speaking_result_page_id) {
+            // Scripts for Speaking Result Page
+            wp_enqueue_script('speaking-result-audio-player', plugin_dir_url(__FILE__) . 'Assets/js/result_audio_player.js', array('jquery'), time(), true);
+            wp_enqueue_script('gf-result-speaking', plugin_dir_url(__FILE__) . 'Assets/js/gf_result_speaking.js', array('jquery','speaking-result-audio-player'), time(), true);
+            wp_enqueue_style('speaking-result-audio-player', plugin_dir_url(__FILE__) . 'Assets/css/result_audio_player.css', array(), time(), 'all');
+            wp_enqueue_style('font-awesome', 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css');
+            wp_enqueue_script('gf-result-vocab-interaction-handler', plugin_dir_url(__FILE__) . 'Assets/js/gf_result_vocab_interaction_handler.js', array('jquery'), time(), true);
+            wp_enqueue_script('gf-result-grammer-interaction-handler', plugin_dir_url(__FILE__) . 'Assets/js/gf_result_grammer_interaction_handler.js', array('jquery'), time(), true);
+            wp_enqueue_script('gf-result-pronun-interaction-handler', plugin_dir_url(__FILE__) . 'Assets/js/gf_result_pronunciation_interaction_handler.js', array('jquery'), time(), true);
 
-            // Prepare data to pass to the script
-            $data_to_pass = array(
-                'firstName' => $firstName,
-                'lastName' => $lastName
-            );
-
-            // Localize the script with the data
-            wp_localize_script('writify-docx-export', 'writifyUserData', $data_to_pass);
-
-            // Enqueue Remarkable Markdown Parser
-            wp_enqueue_script('remarkable', 'https://cdn.jsdelivr.net/remarkable/1.7.1/remarkable.min.js', array(), null, true);
-            // google Scripts 
-            wp_enqueue_script('google-client', 'https://accounts.google.com/gsi/client', array(), null, true);
-            wp_enqueue_script('google-api', 'https://apis.google.com/js/api.js?onload=onApiLoad', array(), null, true);
-            wp_enqueue_script('google-drive-integration', plugin_dir_url(__FILE__) . 'Assets/js/google-drive-export.js', array('google-client', 'google-api', 'writify-docx-export'), time(), true);
-    
-            // Localize the script with the file name parameter
-            $file_name = 'Result';
-            if (isset($_GET['entry_id'])) {
-                $file_name .= '-' . sanitize_text_field($_GET['entry_id']);
-            }
-            $file_name .= '-' . date('Y-m-d-His') . '.docx';
-            wp_localize_script('google-drive-integration', 'driveData', array(
-                'file_name' => $file_name,
-                'api_key' => $settings['gcloud_console_api_key'],
-                'client_id' => $settings['gcloud_app_client_id']
+            // Localize scripts for Speaking Result Page
+            wp_localize_script('gf-result-speaking', 'gfResultSpeaking', array(
+                'formId' => isset($_GET['form_id']) ? (int) sanitize_text_field($_GET['form_id']) : 0,
+                'entryId' => isset($_GET['entry_id']) ? (int) sanitize_text_field($_GET['entry_id']) : 0,
+                'nonce' => wp_create_nonce('wp_rest'),
+                'restUrl' => rest_url(),
+            ));
+            wp_localize_script('gf-result-pronun-interaction-handler', 'pronunData', array(
+                'formId' => isset($_GET['form_id']) ? (int) sanitize_text_field($_GET['form_id']) : 0,
+                'entryId' => isset($_GET['entry_id']) ? (int) sanitize_text_field($_GET['entry_id']) : 0,
+                'nonce' => wp_create_nonce('pronun_api'),
+                'restUrl' => rest_url(),
             ));
 
-            // Enqueue the text interaction handler script
-            wp_enqueue_script('vocab-interaction-handler', plugin_dir_url(__FILE__) . 'Assets/js/vocab_interaction_handler.js', array('jquery'), '1.0.0', true);
+            // Enqueue additional scripts for DOCX export and Google Drive integration
+            wp_enqueue_script('writify-docx-export', plugin_dir_url(__FILE__) . 'Assets/js/gf_docx_export_speaking-result.js', array('jquery'), time(), true);
+            wp_enqueue_script('google-drive-integration', plugin_dir_url(__FILE__) . 'Assets/js/gf_google-drive-export-speaking-result.js', array('google-client', 'google-api', 'writify-docx-export'), time(), true);
 
-            // Enqueue the result page styles
-            wp_enqueue_style('result-page-styles', plugin_dir_url(__FILE__) . 'Assets/css/result_page_styles.css', array(), '1.0.0');
+        }
+        // General scripts for pages starting with 'result'
+        if (substr($slug, 0, 6) === 'result' && $post->ID != $gf_speaking_result_page_id) {
+            wp_enqueue_script('writify-docx-export', plugin_dir_url(__FILE__) . 'Assets/js/docx_export.js', array('jquery'), '1.1.2', true);
+            wp_enqueue_script('google-drive-integration', plugin_dir_url(__FILE__) . 'Assets/js/google-drive-export.js', array('google-client', 'google-api', 'writify-docx-export'), time(), true);
         }
 
-        // Enqueue the script only if the slug starts with 'speaking-result'
-        if (substr($slug, 0, 15) === 'speaking-result') {
-            // Enqueue necessary scripts
-            wp_enqueue_script('writify-docx-export', plugin_dir_url(__FILE__) . 'Assets/js/docx_export_speaking.js', array('jquery'), '1.0.3', true);
-            // Enqueue Docx script
-            wp_enqueue_script('docx', 'https://unpkg.com/docx@8.0.0/build/index.js', array(), null, true);
-            // Enqueue FileSaver script
-            wp_enqueue_script('file-saver', 'https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/1.3.8/FileSaver.js', array(), null, true);
+        // Localize user data for DOCX export
+        $current_user = wp_get_current_user();
+        $primary_identifier = get_user_primary_identifier();
+        $firstName = $current_user->user_firstname;
+        $lastName = $current_user->user_lastname;
+        if ($primary_identifier == 'No_membership' || $primary_identifier == 'subscriber' || $primary_identifier == 'Writify-plus' || $primary_identifier == 'plus_subscriber') {
+            $lastName .= " from IELTS Science";
+        }
+        wp_localize_script('writify-docx-export', 'writifyUserData', array(
+            'firstName' => $firstName,
+            'lastName' => $lastName
+        ));
 
-            // Get current user's data
-            $current_user = wp_get_current_user();
-            $primary_identifier = get_user_primary_identifier();
+        // Localize script for Google Drive integration
+        $file_name = 'Result';
+        if (isset($_GET['entry_id'])) {
+            $file_name .= '-' . sanitize_text_field($_GET['entry_id']);
+        }
+        $file_name .= '-' . date('Y-m-d-His') . '.docx';
+        wp_localize_script('google-drive-integration', 'driveData', array(
+            'file_name' => $file_name,
+            'api_key' => $settings['gcloud_console_api_key'],
+            'client_id' => $settings['gcloud_app_client_id']
+        ));
 
-            // Modify the user's name if they are a subscriber or have no membership
-            $firstName = $current_user->user_firstname;
-            $lastName = $current_user->user_lastname;
-            if ($primary_identifier == 'No_membership' || $primary_identifier == 'subscriber' || $primary_identifier == 'Writify-plus' || $primary_identifier == 'plus_subscriber') {
-                $lastName .= " from IELTS Science"; // Add "IELTS Science" to the last name
-            }
+        // Enqueue result page styles
+        wp_enqueue_style('result-page-styles', plugin_dir_url(__FILE__) . 'Assets/css/result_page_styles.css', array(), time());
 
-            // Prepare data to pass to the script
-            $data_to_pass = array(
-                'firstName' => $firstName,
-                'lastName' => $lastName
-            );
-
-            // Localize the script with the data
-            wp_localize_script('writify-docx-export', 'writifyUserData', $data_to_pass);
-
-            // Enqueue Remarkable Markdown Parser
-            wp_enqueue_script('remarkable', 'https://cdn.jsdelivr.net/remarkable/1.7.1/remarkable.min.js', array(), null, true);
-
-            // Enqueue Grammarly Editor SDK
-            wp_enqueue_script('grammarly-editor-sdk', 'https://js.grammarly.com/grammarly-editor-sdk@2.5?clientId=client_MpGXzibWoFirSMscGdJ4Pt&packageName=%40grammarly%2Feditor-sdk', array(), null, true);
-
-            // Enqueue the text interaction handler script
+        // Enqueue interaction handler script for non-speaking result pages (Existing Code Support)
+        if (substr($slug, 0, 6) === 'result' && $post->ID != $gf_speaking_result_page_id) {
             wp_enqueue_script('vocab-interaction-handler', plugin_dir_url(__FILE__) . 'Assets/js/vocab_interaction_handler.js', array('jquery'), '1.0.0', true);
+        }
 
-            // Enqueue the result page styles
-            wp_enqueue_style('result-page-styles', plugin_dir_url(__FILE__) . 'Assets/css/result_page_styles.css', array(), '1.0.0');
+        // Enqueue Grammarly and other interaction scripts for pages starting with 'speaking-result'
+        if (substr($slug, 0, 15) === 'speaking-result') {
+            wp_enqueue_script('grammarly-editor-sdk', 'https://js.grammarly.com/grammarly-editor-sdk@2.5?clientId=client_MpGXzibWoFirSMscGdJ4Pt&packageName=%40grammarly%2Feditor-sdk', array(), null, true);
+            wp_enqueue_script('vocab-interaction-handler', plugin_dir_url(__FILE__) . 'Assets/js/vocab_interaction_handler.js', array('jquery'), '1.0.0', true);
         }
     }
 }
@@ -360,10 +658,6 @@ function google_drive_further_actions_shortcode() {
                 event.preventDefault();
                 handleAuthClick();
             });
-
-            if (oauthToken) {
-                onApiLoad(); // Load Picker API if token is already available
-            }
         });
     </script>
     <?php
@@ -432,6 +726,9 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
     // Parse the merge tags in the message.
     $message = GFCommon::replace_variables($message, $form, $entry, false, false, false, "text");
 
+    // Is Request is Made for Scores?
+     // Possible Values 'no','grammer_scores','vocab_scores'
+    $request_for_scores = isset($feed['meta']['request_is_for_scores']) ? $feed['meta']['request_is_for_scores'] : 'no'; // Possible Values 'no','grammer_scores','vocab_scores'
     GFAPI::add_note(
         $entry["id"],
         0,
@@ -538,10 +835,10 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
 
     $body["stream"] = true;
 
-    $timeout_duration = rgar($feed[0]['meta'], $endpoint . '_' . 'timeout', 120);
+    $timeout_duration = rgar($feed['meta'], $endpoint . '_' . 'timeout', 120);
 
     // Add retry mechanism
-    $max_retries = 20;
+    $max_retries = 2;
     $retry_count = 0;
 
     do {
@@ -581,7 +878,7 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
 
         $buffer = '';
         
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($object, $stream_to_frontend, $GWiz_GF_OpenAI_Object, &$buffer) {
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($request_for_scores, $object, $stream_to_frontend, $GWiz_GF_OpenAI_Object, &$buffer) {
             $GWiz_GF_OpenAI_Object->log_debug("Raw data received: " . $data);
         
             // Append new data to the buffer
@@ -633,23 +930,27 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
         
                 // Log the processed item
                 $GWiz_GF_OpenAI_Object->log_debug("Processed item: " . json_encode($pop_js));
-        
-                if ($stream_to_frontend === 'yes') {
-                    echo "data: " . $pop_item . "\n\n";
-                    flush();
-                }
-                if ($stream_to_frontend === 'question') {
-                    if (!empty($line)) {
-                        echo "data: " . json_encode(['response' => $line, 'streamType' => 'question']) . "\n\n";
-                        flush();
+                    if($request_for_scores && $request_for_scores == 'no'){
+                        if ($stream_to_frontend === 'yes') {
+                            echo "event: " . 'chat/completions' . PHP_EOL;
+                            echo "data: " . $pop_item . "\n\n";
+                            flush();
+                        }
+                        if ($stream_to_frontend === 'question') {
+                            if (!empty($line)) {
+                                echo "event: " . 'chat/completions' . PHP_EOL;
+                                echo "data: " . json_encode(['response' => $line, 'streamType' => 'question']) . "\n\n";
+                                flush();
+                            }
+                        }
+                        if ($stream_to_frontend === 'text') {
+                            if (!empty($line)) { // Only send non-empty lines
+                                echo "event: " . 'chat/completions' . PHP_EOL;
+                                echo "data: " . json_encode(['response' => $line]) . "\n\n";
+                            }
+                            flush(); // Ensure the data is sent to the client immediately
+                        }
                     }
-                }
-                if ($stream_to_frontend === 'text') {
-                    if (!empty($line)) { // Only send non-empty lines
-                        echo "data: " . json_encode(['response' => $line]) . "\n\n";
-                    }
-                    flush(); // Ensure the data is sent to the client immediately
-                }
             }
 
             return strlen($data);
@@ -722,12 +1023,48 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
                         "Stopped retry after OpenAI Error Response (" . $feed["meta"]["feed_name"] . ")",
                         $object->error
                     );
+                    $GWiz_GF_OpenAI_Object->log_debug("Returning Object: " . print_r($object, true));
                     return $object;
                 }
             }
         }
     } while ($retry);
 
+    if($request_for_scores !== 'no'){
+		$GWiz_GF_OpenAI_Object->log_debug("Request Is For Scores " . $request_for_scores);
+		if (file_exists(plugin_dir_path(__FILE__) . 'Includes/merge tags/generated_band_score_merge_tag.php')) {
+            require_once plugin_dir_path(__FILE__) . 'Includes/merge tags/generated_band_score_merge_tag.php';
+        } else {
+            $GWiz_GF_OpenAI_Object->log_debug("File Not Found");
+        }
+        if($request_for_scores == 'grammer_scores'){
+            $criterion='GRA'; // LR for Lexical Resource (Vocabulary) GRA for Grammar
+            $parsedData = parse_field_value($object->res);
+            $GWiz_GF_OpenAI_Object->log_debug("Score Parsed Data: " . print_r($parsedData, true));
+            error_log("Merged Field Values: " . print_r($parsedData, true));
+            $word_count = str_word_count($object->res, 0, '0123456789');
+            $grammer_score = get_lowest_band_score($parsedData, $criterion, $word_count);
+            $GWiz_GF_OpenAI_Object->log_debug("Grammer Score: " . print_r($grammer_score, true));
+            gform_add_meta(
+                $entry["id"],
+                "grammer_score",
+                $grammer_score
+            );
+        }elseif($request_for_scores == 'vocab_scores'){
+            $criterion='LR'; // LR for Lexical Resource (Vocabulary) GRA for Grammar
+            $parsedData = parse_field_value($object->res);
+            $GWiz_GF_OpenAI_Object->log_debug("Score Parsed Data: " . print_r($parsedData, true));
+            error_log("Merged Field Values: " . print_r($parsedData, true));
+            $word_count = str_word_count($object->res, 0, '0123456789');
+            $vocab_score = get_lowest_band_score($parsedData, $criterion, $word_count);
+            $GWiz_GF_OpenAI_Object->log_debug("Vocab Score: " . print_r($vocab_score, true));
+            gform_add_meta(
+                $entry["id"],
+                "vocab_score",
+                $vocab_score
+            );
+        }
+    }
     gform_add_meta(
         $entry["id"],
         "openai_response_" . $feed["id"],
@@ -740,10 +1077,15 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
 
 function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form)
 {
+    $object = new stdClass();
+    $object->res = "";
+    $object->error = "";
     // Get file field ID, model, prompt, and language from the feed settings
     $model = rgar($feed['meta'], 'whisper_model', 'whisper-1');
     $file_field_id = rgar($feed['meta'], 'whisper_file_field');
-    $prompt = rgar($feed['meta'], 'whisper_prompt', "A Vietnamese student is preparing for the IELTS speaking test. The speech may include parts 1, 2, or 3 of the exam, featuring a monologue where the student poses questions to themselves and then provides answers. Topics cover various aspects relevant to Vietnam, such as cultural landmarks, traditional foods, and significant historical figures. The student uses Vietnamese-specific terms where appropriate, showcasing cultural knowledge. Importantly, the speech includes intentional grammatical errors a non-native English speaker. The speech also includes natural speech patterns like 'uhm' and 'uh'. Describe a famous destination. Today, I want talking about. Umm, let me think like, hmm... Okay, here's what I'm, like, thinking...");
+    $prompt = rgar($feed['meta'], 'whisper_prompt', "I'm, uh, is a, you know, Vietnamese ESL student. So, like, uhm, I may make some mistake in my grammar.");
+    // Replace regular spaces with non-breaking spaces
+//     $prompt = str_replace(' ', "\u00A0", $prompt);
     $language = rgar($feed['meta'], 'whisper_language', 'en');
 
     // Logging the feed settings
@@ -754,6 +1096,7 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
     $GWiz_GF_OpenAI_Object->log_debug("File URLs: " . print_r($file_urls, true));
 
     $combined_text = ""; // Initialize a string to store all transcriptions
+    $combined_response = []; // Array of Raw Responses From Whisper
 
     // Decode JSON string to array if necessary
     if (is_string($file_urls)) {
@@ -767,14 +1110,87 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
             $GWiz_GF_OpenAI_Object->log_debug("Processing file URL: {$file_url}");
             $file_path = $GWiz_GF_OpenAI_Object->convert_url_to_path($file_url);
             $GWiz_GF_OpenAI_Object->log_debug("Converted file path: {$file_path}");
+			$GWiz_GF_OpenAI_Object->log_debug("I am Here");
 
             if (is_readable($file_path)) {
-                $curl_file = curl_file_create($file_path, 'audio/mpeg', basename($file_path));
+				try {
+                    // Log file readability
+                    $GWiz_GF_OpenAI_Object->log_debug("File is Readable: {$file_path}");
+                    
+                    // Check if file exists and log success/failure
+                    if (!file_exists($file_path)) {
+                        throw new Exception("File does not exist: {$file_path}");
+                    }
+        
+                    // Manually assign MIME type based on file extension
+                    $extension = pathinfo($file_path, PATHINFO_EXTENSION);
+                    $GWiz_GF_OpenAI_Object->log_debug("File extension detected: {$extension}");
+        
+                    // Define supported MIME types for audio files
+                    $mime_types = [
+                        'aac'   => 'audio/aac',
+						'aiff'  => 'audio/x-aiff',
+						'amr'   => 'audio/amr',
+						'flac'  => 'audio/flac',
+						'm4a'   => 'audio/x-m4a',
+						'm4b'   => 'audio/x-m4b',
+						'm4p'   => 'audio/x-m4p',
+						'mp3'   => 'audio/mpeg',
+						'mpga'  => 'audio/mpeg',
+						'ogg'   => 'audio/ogg',
+						'oga'   => 'audio/ogg',
+						'opus'  => 'audio/opus',
+						'wav'   => 'audio/wav',
+						'weba'  => 'audio/webm',
+						'wma'   => 'audio/x-ms-wma',
+						'3gp'   => 'audio/3gpp',
+						'3g2'   => 'audio/3gpp2',
+						'mid'   => 'audio/midi',
+						'midi'  => 'audio/midi',
+						'rmi'   => 'audio/midi',
+						'xmf'   => 'audio/mobile-xmf',
+						'aac'   => 'audio/aac',
+						'au'    => 'audio/basic',
+						'snd'   => 'audio/basic',
+						'caf'   => 'audio/x-caf',
+						'aif'   => 'audio/x-aiff',
+						'aifc'  => 'audio/x-aiff',
+						'kar'   => 'audio/midi',
+                    ];
+        
+                    // Check if the extension exists in the mime_types array
+                    if (isset($mime_types[$extension])) {
+                        $mime_type = $mime_types[$extension];
+                        $GWiz_GF_OpenAI_Object->log_debug("MIME type detected: {$mime_type}");
+                    } else {
+                        // Default MIME type for unknown audio files
+                        $GWiz_GF_OpenAI_Object->log_debug("Unknown file extension, using default MIME type.");
+                        $mime_type = 'application/octet-stream';
+                    }
+        
+                    // Create CURLFile object
+                    $GWiz_GF_OpenAI_Object->log_debug("Attempting to create CURLFile object...");
+                    $curl_file = new CURLFile($file_path, $mime_type, basename($file_path));
+                    if ($curl_file === false) {
+                        throw new Exception("Failed to create CURLFile object for file: {$file_path}");
+                    }
+                    $GWiz_GF_OpenAI_Object->log_debug("CURLFile object created successfully: " . print_r($curl_file, true));
+        
+                } catch (Exception $e) {
+                    // Handle the error and return object with error message
+                    $GWiz_GF_OpenAI_Object->log_error("An error occurred: " . $e->getMessage());
+                    $object->error = $e->getMessage();  // Set error message in object
+                    return $object;  // Return the object with error message
+                }
+				
+				$GWiz_GF_OpenAI_Object->log_debug("CURL File:", print_r($curl_file,true));
                 $body = array(
                     'file' => $curl_file,
-                    'model' => $model,
+                    'model' => 'systran/faster-whisper-medium.en',
                     'prompt' => $prompt,
-                    'language' => $language
+                    'language' => $language,
+                    'response_format' => 'verbose_json',
+                    'timestamp_granularities[]' => ['word', 'segment']
                 );
                 $GWiz_GF_OpenAI_Object->log_debug("Request body for Whisper API: " . print_r($body, true));
 
@@ -797,19 +1213,25 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
                 if (is_wp_error($response)) {
                     $GWiz_GF_OpenAI_Object->log_debug("Error from Whisper API: " . $response->get_error_message());
                     $GWiz_GF_OpenAI_Object->add_feed_error($response->get_error_message(), $feed, $entry, $form);
+                    $object->error = $response->get_error_message();
+                    return $object;
                 } else if (rgar($response, 'error')) {
                     $GWiz_GF_OpenAI_Object->log_debug("Error in response data: " . $response['error']['message']);
                     $GWiz_GF_OpenAI_Object->add_feed_error($response['error']['message'], $feed, $entry, $form);
+                    $object->error = $response['error']['message'];
+                    return $object;
                 } else {
-                    $text = $GWiz_GF_OpenAI_Object->get_text_from_response($response);
+                    // $text = $GWiz_GF_OpenAI_Object->get_text_from_response($response);
+                    $text = $response['text'];
                     $GWiz_GF_OpenAI_Object->log_debug("Transcription text: {$text}");
                     if (!is_wp_error($text)) {
                         GFAPI::add_note($entry['id'], 0, 'Whisper API Response (' . $feed['meta']['feed_name'] . ')', $text);
                         // Append each transcription to the combined string
                         $combined_text .= $text . "\n\n";
-
+                        $combined_response[] = $response;
                         // Stream each response using SSE
-                        echo "data: " . json_encode(['response' => $text]) . "\n\n";
+                        echo "event: " . 'whisper' . PHP_EOL;
+                        echo "data: " . json_encode(['response' => $response]) . "\n\n";
                         flush(); // Flush data to the browser after each file is transcribed
                     } else {
                         $GWiz_GF_OpenAI_Object->log_debug("Error in extracting text: " . $text->get_error_message());
@@ -819,6 +1241,8 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
             } else {
                 $GWiz_GF_OpenAI_Object->log_debug("File not accessible: {$file_path}");
                 $GWiz_GF_OpenAI_Object->add_feed_error("File is not accessible or does not exist: " . $file_path, $feed, $entry, $form);
+                $object->error = "File not accessible: {$file_path}";
+                return $object;
             }
         }
     } else {
@@ -834,7 +1258,14 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
         $entry = $GWiz_GF_OpenAI_Object->maybe_save_result_to_field($feed, $entry, $form, $combined_text);
 
         // Optionally, store the combined text as a meta for the entry
-        gform_add_meta($entry['id'], 'whisper_combined_response', $combined_text);
+        gform_add_meta($entry['id'], 'whisper_combined_response', json_encode($combined_response));
+        gform_add_meta($entry['id'], 'audio_urls', $file_urls);
+
+        // Store WPM
+        $wpm = calculateWPM($combined_response);
+        $GWiz_GF_OpenAI_Object->log_debug("whisper combined:" . print_r($combined_response,true));
+        $GWiz_GF_OpenAI_Object->log_debug("WPM: {$wpm}");
+        gform_add_meta($entry['id'], 'wpm', $wpm);
     }
 
     return $entry;
@@ -843,6 +1274,32 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
 
 function writify_handle_languagetool($GWiz_GF_OpenAI_Object, $feed, $entry, $form)
 {
+    $object = new stdClass();
+    $object->error = "";
+    // Helper Function 
+    function convert_to_human_readable($response_body)
+	{
+        if(count($response_body['matches']) < 1){
+            $readable_text = "No Grammer Errors Found";
+            return $readable_text;
+        }
+
+        $readable_text = "LanguageTool API found the following issues:\n";
+        foreach ($response_body['matches'] as $match) {
+            $message = $match['message'];
+            $context = $match['context']['text'];
+            $offset = $match['context']['offset'];
+            $length = $match['context']['length'];
+            $replacements = array_column($match['replacements'], 'value');
+            $replacements_text = implode(', ', $replacements);
+
+            $readable_text .= "\nIssue: $message\n";
+            $readable_text .= "Context: " . substr($context, 0, $offset) . '[' . substr($context, $offset, $length) . ']' . substr($context, $offset + $length) . "\n";
+            $readable_text .= "Suggested Replacements: $replacements_text\n";
+        }
+    
+        return $readable_text;
+	}
     // Prepare Payload
     $text_field_id = rgar($feed['meta'], 'languagetool_text_source_field');
     $text = rgar($entry, $text_field_id);
@@ -869,23 +1326,32 @@ function writify_handle_languagetool($GWiz_GF_OpenAI_Object, $feed, $entry, $for
     if (is_wp_error($response)) {
         $GWiz_GF_OpenAI_Object->log_debug("Error from LanguageTool API: " . $response->get_error_message());
         $GWiz_GF_OpenAI_Object->add_feed_error($response->get_error_message(), $feed, $entry, $form);
+        $object->error = $response->get_error_message();
+        return $object;
     } else if (rgar($response, 'error')) {
         $GWiz_GF_OpenAI_Object->log_debug("Error in response data: " . $response['error']['message']);
         $GWiz_GF_OpenAI_Object->add_feed_error($response['error']['message'], $feed, $entry, $form);
+        $object->error = $response['error']['message'];
+        return $object;
     } else {
         $response_body = $response['body']; // Assuming response body contains the relevant data
+        $human_readable_response_body = json_decode(wp_remote_retrieve_body($response), true);
         GFAPI::add_note(
             $entry['id'],
             0,
             'LanguageTool API Response (' . $feed['meta']['feed_name'] . ')',
             $response_body
         );
-
         // Optionally, store the response as a meta for the entry
         gform_add_meta($entry['id'], 'languagetool_response_' . $feed['id'], $response_body);
-
-        // Update the entry if needed
-        $entry = $GWiz_GF_OpenAI_Object->maybe_save_result_to_field($feed, $entry, $form, $response_body);
+        
+        // Convert the response into human-readable format and save
+		$human_readable_response = convert_to_human_readable($human_readable_response_body);
+        $entry = $GWiz_GF_OpenAI_Object->maybe_save_result_to_field($feed, $entry, $form, $human_readable_response);
+        // Stream each response using SSE
+        echo "event: " . 'languagetool' . PHP_EOL;
+        echo "data: " . json_encode(['response' => $response_body]) . "\n\n";
+        flush(); // Flush data to the browser after each file is processed
     }
 
     return $entry;
@@ -893,9 +1359,19 @@ function writify_handle_languagetool($GWiz_GF_OpenAI_Object, $feed, $entry, $for
 
 function writify_handle_pronunciation($GWiz_GF_OpenAI_Object, $feed, $entry, $form)
 {
+    
+    $object = new stdClass();
+    $object->res = "";
+    $object->error = "";
     // Get field IDs and settings from the feed
     $text_field_id = rgar($feed['meta'], 'pronunciation_reference_text_field');
     $file_field_id = rgar($feed['meta'], 'pronunciation_audio_file_field');
+    $user_allowed_to_use_api = false;
+    $form_id = $form['id'];
+    $requests_used_by_user = 0;
+    $allowed_number_of_api_requests = 0;
+    $is_user_logged_in = is_user_logged_in(  );
+
     $grading_system = rgar($feed['meta'], 'pronunciation_grading_system', 'HundredMark');
     $granularity = rgar($feed['meta'], 'pronunciation_granularity', 'Phoneme');
     $dimension = rgar($feed['meta'], 'pronunciation_dimension', 'Comprehensive');
@@ -903,73 +1379,128 @@ function writify_handle_pronunciation($GWiz_GF_OpenAI_Object, $feed, $entry, $fo
 
     // Get the file URLs and reference text from the entry
     $file_urls = rgar($entry, $file_field_id);
-    $reference_text = rgar($entry, $text_field_id);
-
+    
+    $gpls_result = check_user_submission_limit($GWiz_GF_OpenAI_Object, $feed, $entry, $form);
+    $GWiz_GF_OpenAI_Object->log_debug("GPLS Test Result:".print_r($gpls_result,true));
     // Convert file_urls to array if it's a JSON string
     if (is_string($file_urls)) {
         $file_urls = json_decode($file_urls, true);
     }
 
     // Initialize an array to store responses
-    $responses = array();
-
+    $pronun_combined_response = array();
+    $combined_pronun_fluency_scores = array(
+        'fluency_scores' => [],
+        'pronun_scores' => [],
+    );
+    $url_count = 0;
     // Proceed only if $file_urls is an array
     if (is_array($file_urls)) {
         foreach ($file_urls as $file_url) {
+            $whisperResponses = gform_get_meta($entry['id'], 'whisper_combined_response');
+            if($whisperResponses){
+                $whisperResponses = json_decode($whisperResponses);
+                if(is_array($whisperResponses) && count($whisperResponses) == count($file_urls)){
+                    $currentWhisperResponse = $whisperResponses[$url_count];
+                    $reference_text = $currentWhisperResponse->text;
+                    // $GWiz_GF_OpenAI_Object->log_debug("Whisper Response Count " .count($whisperResponses));
+                    // $GWiz_GF_OpenAI_Object->log_debug("File URLs " .print_r($file_urls, true));
+                    // $GWiz_GF_OpenAI_Object->log_debug("Responses Is Array " .print_r($reference_text, true));
+                }
+            }
+            $url_count++;
             $GWiz_GF_OpenAI_Object->log_debug("Processing file URL: {$file_url}");
+            
 
-            // Prepare the request body
-            $body = array(
-                'url' => $file_url,
-                'reference_text' => $reference_text,
-                'grading_system' => $grading_system,
-                'granularity' => $granularity,
-                'dimension' => $dimension,
-                'enable_prosody' => $enable_prosody
-            );
 
-            $GWiz_GF_OpenAI_Object->log_debug("Request body for Pronunciation API: " . print_r($body, true));
-
-            GFAPI::add_note(
-                $entry["id"],
-                0,
-                "OpenAI Request (" . $feed["meta"]["feed_name"] . ")",
-                sprintf(
-                    __(
-                        "Sent request to OpenAI pronunciation endpoint.",
-                        "gravityforms-openai"
-                    )
-                )
-            );
-
-            $response = $GWiz_GF_OpenAI_Object->make_request('pronunciation', $body, $feed);
-            $GWiz_GF_OpenAI_Object->log_debug("Response from Pronunciation API: " . print_r($response, true));
-
-            if (is_wp_error($response)) {
-                $GWiz_GF_OpenAI_Object->log_debug("Error from Pronunciation API: " . $response->get_error_message());
-                $GWiz_GF_OpenAI_Object->add_feed_error($response->get_error_message(), $feed, $entry, $form);
-            } else if (rgar($response, 'error')) {
-                $GWiz_GF_OpenAI_Object->log_debug("Error in response data: " . $response['error']['message']);
-                $GWiz_GF_OpenAI_Object->add_feed_error($response['error']['message'], $feed, $entry, $form);
-            } else {
-                $response_body = wp_remote_retrieve_body($response);
-                $response_body = $GWiz_GF_OpenAI_Object->parse_event_stream_data($response_body);
-                $pretty_json = json_encode($response_body, JSON_PRETTY_PRINT);
-                $GWiz_GF_OpenAI_Object->log_debug("Pretty JSON: " . print_r($pretty_json, true));
-                $responses[$file_url] = $pretty_json;
+            if($gpls_result['status'] === 'success'){
+                // $file_url = 'https://beta.ieltsscience.fun/wp-content/uploads/2024/09/Describe-a-party-that-you-enjoyed-1716823970096.mp3';
+                // $reference_text = "So, well, I don't really go to a lot of parties. And there aren't any memorable parties that I partake in because I think the reason is because my definition of party is kind of different. Because I often think that party often involves, like, a group of people, like a huge group of people just hanging out. And, like, in the now, we don't really have that kind of parties. We do have, we regularly hang out with our friends, just like a group of three guys. And we would just go to a restaurant or just go to a cafe, not regularly, regularly though. So, and obviously, I enjoyed, like, all of them. But there's, like, the most recent one is, like, yesterday where it's, like, my friend's birthday. And we just got together to his place and, you know, just have a good meal together and then it was pretty fun. Yeah. ";
+                // Prepare the request body
+                $body = array(
+                    'url' => $file_url,
+                    'reference_text' => $reference_text,
+                    'grading_system' => $grading_system,
+                    'granularity' => $granularity,
+                    'dimension' => $dimension,
+                    'enable_prosody' => $enable_prosody
+                );
+                $GWiz_GF_OpenAI_Object->log_debug("Request body for Pronunciation API: " . print_r($body, true));
 
                 GFAPI::add_note(
-                    $entry['id'],
+                    $entry["id"],
                     0,
-                    'Pronunciation API Response (' . $feed['meta']['feed_name'] . ')',
-                    $pretty_json
+                    "OpenAI Request (" . $feed["meta"]["feed_name"] . ")",
+                    sprintf(
+                        __(
+                            "Sent request to OpenAI pronunciation endpoint.",
+                            "gravityforms-openai"
+                        )
+                    )
                 );
 
-                // Optionally, store the response as a meta for the entry
-                gform_add_meta($entry['id'], 'pronunciation_response_' . $feed['id'], $responses);
+                $response = $GWiz_GF_OpenAI_Object->make_request('pronunciation', $body, $feed);
+                $GWiz_GF_OpenAI_Object->log_debug("Response from Pronunciation API: " . print_r($response, true));
+
+                if (is_wp_error($response)) {
+                    $GWiz_GF_OpenAI_Object->log_debug("Error from Pronunciation API: " . $response->get_error_message());
+                    $GWiz_GF_OpenAI_Object->add_feed_error($response->get_error_message(), $feed, $entry, $form);
+                    $object->error = $response->get_error_message();
+                    return $object;
+                } else if (rgar($response, 'error')) {
+                    $GWiz_GF_OpenAI_Object->log_debug("Error in response data: " . $response['error']['message']);
+                    $GWiz_GF_OpenAI_Object->add_feed_error($response['error']['message'], $feed, $entry, $form);
+                    $object->error = $response->get_error_message();
+                    return $response['error']['message'];
+                } else {
+                    $response_body = wp_remote_retrieve_body($response);
+                    // $GWiz_GF_OpenAI_Object->log_debug("Pronunciation Response Body " . $response_body);
+                    $response_body = $GWiz_GF_OpenAI_Object->parse_event_stream_data($response_body);
+                    // $response_body = json_encode($response_body, JSON_PRETTY_PRINT);
+                    $response_body = $response_body;
+                    $GWiz_GF_OpenAI_Object->log_debug("Pretty JSON: " . print_r($response_body, true));
+                    $pronun_combined_response[$file_url] = $response_body;
+                    $GWiz_GF_OpenAI_Object->log_debug("Processed File URL: " . $file_url);
+                    GFAPI::add_note(
+                        $entry['id'],
+                        0,
+                        'Pronunciation API Response (' . $feed['meta']['feed_name'] . ')',
+                        $response_body
+                    );
+                    $GWiz_GF_OpenAI_Object->log_debug("Before Saving Value in Entry Meta pronunciation_response_$url_count:".print_r($response_body));
+                    // Optionally, store the response as a meta for the entry
+                    gform_add_meta($entry['id'], 'pronunciation_response_' . $url_count, $response_body);
+                    
+                    // Calculate File Accuracy Score
+                    $pronun_fluency_scores = calculate_pronun_fluency_scores($response_body);
+                    $GWiz_GF_OpenAI_Object->log_debug("file_$url_count Pronunciation Score:".print_r($pronun_fluency_scores['pronun_score'],true));
+                    $GWiz_GF_OpenAI_Object->log_debug("file_$url_count Fluency Score:".print_r($pronun_fluency_scores['fluency_score'],true));
+                    $combined_pronun_fluency_scores['pronun_scores'][] = $pronun_fluency_scores['pronun_score'];
+                    $combined_pronun_fluency_scores['fluency_scores'][] = $pronun_fluency_scores['fluency_score'];
+                    // Update Current User Meta
+                    $requests_used_by_user = get_user_meta($current_user->ID, "pronun_api_used_count_$form_id", true);
+                    $requests_used_by_user = intval($requests_used_by_user) + 1;
+                    update_user_meta( $current_user->ID, "pronun_api_used_count_$form_id", $requests_used_by_user);
+                    // Stream each response using SSE
+                    echo "event: " . 'pronunciation' . PHP_EOL;
+                    echo "data: " . json_encode(['response' => $response_body]) . "\n\n";
+                    flush(); // Flush data to the browser after each file is processed
+                }
+            }else{
+                $response_body = array(
+                    'error' => true,
+                    'loggedIn' => $is_user_logged_in,
+                    'message' => $gpls_result['message'],
+                    'submission_count' => $gpls_result['submission_count'],
+                    'submission_limit' => $gpls_result['submission_limit'],
+                    'time_period' => $gpls_result['time_period'],
+                );
+                // Store the response as a meta for the entry
+                gform_add_meta($entry['id'], 'pronunciation_response_' . $url_count, $response_body);
 
                 // Stream each response using SSE
-                echo "data: " . json_encode(['response' => $pretty_json]) . "\n\n";
+                echo "event: " . 'pronunciation' . PHP_EOL;
+                echo "data: " . json_encode(['response' => $response_body]) . "\n\n";
                 flush(); // Flush data to the browser after each file is processed
             }
         }
@@ -978,15 +1509,77 @@ function writify_handle_pronunciation($GWiz_GF_OpenAI_Object, $feed, $entry, $fo
     }
 
     // Logging the combined responses
-    $GWiz_GF_OpenAI_Object->log_debug("Combined pronunciation responses: " . print_r($responses, true));
+    // $GWiz_GF_OpenAI_Object->log_debug("Combined pronunciation responses: " . print_r($responses, true));
 
     // Update the entry with the combined responses
-    if (!empty($responses)) {
-        GFAPI::add_note($entry['id'], 0, 'Pronunciation API Combined Response', implode("\n\n", $responses));
-        $entry = $GWiz_GF_OpenAI_Object->maybe_save_result_to_field($feed, $entry, $form, implode("\n\n", $responses));
+    if (!empty($pronun_combined_response)) {
+        GFAPI::add_note($entry['id'], 0, 'Pronunciation API Combined Response', implode("\n\n", $pronun_combined_response));
     }
 
+    function calculate_average($scores) {
+        $count = count($scores);
+        
+        // Check if there are no elements in the array
+        if ($count === 0) {
+            return 0; // Return 0 if no elements
+        }
+        
+        // If there is only one element, return that element as the average
+        if ($count === 1) {
+            return round($scores[0], 1);
+        }
+        
+        // Otherwise, calculate the average and round to 1 decimal place
+        $average = array_sum($scores) / $count;
+        return round($average, 1);
+    }
+    
+    // Calculate averages
+    $avg_fluency_score = calculate_average($combined_pronun_fluency_scores['fluency_scores']);
+    $avg_pronun_score = calculate_average($combined_pronun_fluency_scores['pronun_scores']);
+
+    // Stream each response using SSE
+    echo "event: " . 'fluency_score' . PHP_EOL;
+    echo "data: " . json_encode(['response' => $avg_fluency_score]) . "\n\n";
+    flush(); // Flush data to the browser after each file is processed
+    // Stream each response using SSE
+    echo "event: " . 'pronun_score' . PHP_EOL;
+    echo "data: " . json_encode(['response' => $avg_pronun_score]) . "\n\n";
+    flush(); // Flush data to the browser after each file is processed
+
+    // Store the response as a meta for the entry
+    gform_add_meta($entry['id'], 'fluency_score', $avg_fluency_score);
+    gform_add_meta($entry['id'], 'pronun_score', $avg_pronun_score);
+
     return $entry;
+}
+
+function calculate_pronun_fluency_scores($pronunciation_api_parsed_response) {
+    $sentence_count = count($pronunciation_api_parsed_response);
+
+    // Initialize total scores
+    $total_pronun_accuracy_scores = 0;
+    $total_fluency_accuracy_scores = 0;
+
+    // Loop through each sentence data and sum the accuracy and fluency scores
+    foreach($pronunciation_api_parsed_response as $sentence_data) {
+        // Scale down from 100 to 10
+        $pronun_accuracy_score = $sentence_data['NBest'][0]['PronunciationAssessment']['AccuracyScore'] / 10;
+        $fluency_accuracy_score = $sentence_data['NBest'][0]['PronunciationAssessment']['FluencyScore'] / 10;
+
+        $total_pronun_accuracy_scores += $pronun_accuracy_score;
+        $total_fluency_accuracy_scores += $fluency_accuracy_score;
+    }
+
+    // Calculate the average scores
+    $pronun_score = $total_pronun_accuracy_scores / $sentence_count;
+    $fluency_score = $total_fluency_accuracy_scores / $sentence_count;
+
+    // Return the scores as an array
+    return [
+        'pronun_score' => round($pronun_score, 2),  // Rounded to 2 decimal places
+        'fluency_score' => round($fluency_score, 2), // Rounded to 2 decimal places
+    ];
 }
 
 function get_user_primary_identifier()
@@ -1027,9 +1620,11 @@ function event_stream_openai(WP_REST_Request $request)
     $GWiz_GF_OpenAI_Object = new GWiz_GF_OpenAI();
 
     // New function to output SSE data.
-    $send_data = function ($data) {
+    $send_data = function ($data,$event = 'message') {
+        echo "event: " . $event . PHP_EOL;
         echo "data: " . $data . PHP_EOL;
         echo PHP_EOL;
+        ob_flush();
         flush();
     };
 
@@ -1070,7 +1665,7 @@ function event_stream_openai(WP_REST_Request $request)
         $send_data("[DIVINDEX-0]");
 
         $feeds = writify_get_feeds($form_id);
-
+        $send_data(json_encode($feeds),'feeds'); // temp
         if (empty($feeds)) {
             $send_data("[ALLDONE]");
         }
@@ -1080,7 +1675,7 @@ function event_stream_openai(WP_REST_Request $request)
 
         // Get current processed feeds.
         $meta = gform_get_meta($entry["id"], "processed_feeds");
-
+        $send_data(json_encode($meta)); // temp
         // If no feeds have been processed for this entry, initialize the meta array.
         if (empty($meta)) {
             $meta = [];
@@ -1119,10 +1714,67 @@ function event_stream_openai(WP_REST_Request $request)
             if (in_array((string) $feed["id"], $processed_feeds)) {
                 if ($end_point === "whisper") {
                     // Handle Whisper API response
-                    // Assuming $entry[$field_id] contains the Whisper response
-                    $whisperResponse = $entry[$field_id];
-                    $send_data(json_encode(['response' => $whisperResponse]));
+                    // Send Audio URLs To Frontend First
+                    $audio_urls = gform_get_meta($entry['id'], 'audio_urls');
+                    $send_data(json_encode(['response' => $audio_urls]), 'audio_urls');
+                    // Get WPM value If Stored
+                    $wpm = gform_get_meta($entry['id'], 'wpm');
+                    $send_data(json_encode(['response' => $wpm]), 'wpm');
+                    // Handle More then One Responses Generated by More then One audio Files 
+                    $whisperResponses = gform_get_meta($entry['id'], 'whisper_combined_response');
+                    $whisperResponses = json_decode($whisperResponses);
+                    if(is_array($whisperResponses)){
+                        foreach($whisperResponses as $whisperResponse){
+                            $send_data(json_encode(['response' => $whisperResponse]), $end_point);
+                        }
+                    }else{
+                        $send_data(json_encode(['response' => $whisperResponses]), $end_point);
+                    }
                 }
+
+                if ($end_point === "chat/completions") {
+                    $request_for_scores = isset($feed['meta']['request_is_for_scores']) ? $feed['meta']['request_is_for_scores'] : 'no'; // Possible Values 'no','grammer_scores','vocab_scores'
+					$GWiz_GF_OpenAI_Object->log_debug("Request For Scores: " . $request_for_scores);
+                    if($request_for_scores !== 'no'){
+                        if($request_for_scores == 'grammer_scores'){
+                            $grammer_score = intVal(gform_get_meta($entry['id'], 'grammer_score')) ?? 0;
+                            $send_data(json_encode(['response' => $grammer_score]), 'grammer_score');
+                        }
+                        if($request_for_scores == 'vocab_scores'){
+                            $vocab_score = intVal(gform_get_meta($entry['id'], 'vocab_score')) ?? 0;
+                            $send_data(json_encode(['response' => $vocab_score]), 'vocab_score');
+                        }
+                    }else{
+                        $chat_completions = $entry[$field_id];
+                        $send_data(json_encode(['response' => $chat_completions]), $end_point);
+                    }
+                }
+
+                if ($end_point === "languagetool") {
+                    $languagetool_response = gform_get_meta($entry['id'], 'languagetool_response_'. $feed["id"]);
+                    $send_data(json_encode(['response' => $languagetool_response]) , $end_point);
+                }
+
+                if ($end_point === "pronunciation") {
+                    $pronun_response = gform_get_meta($entry['id'], "formated_pronunciation_response_".$feed['id']);
+                    $GWiz_GF_OpenAI_Object->log_debug("Meta Key " . print_r("formated_pronunciation_response_".$feed['id'],true));
+                    $processedPronunResponse['saved_response'] = $pronun_response; // Adding a key saved_response to identify wheter it is a new response or saved response
+                    $send_data(json_encode(['response' => $processedPronunResponse]), $end_point);
+                    // Send Fluency Errors
+                    $fluency_errors = gform_get_meta($entry['id'], 'fluency_errors_' . $feed['id']);
+                    $send_data(json_encode(['response' => $fluency_errors]), 'fluency_errors');
+                    $fluency_score = gform_get_meta($entry['id'], "fluency_score") ?? '';
+                    // Stream each response using SSE
+                    echo "event: " . 'fluency_score' . PHP_EOL;
+                    echo "data: " . json_encode(['response' => $fluency_score]) . "\n\n";
+                    flush(); // Flush data to the browser after each file is processed
+                    $pronun_score = gform_get_meta($entry['id'], "pronun_score") ?? '';
+                    // Stream each response using SSE
+                    echo "event: " . 'pronun_score' . PHP_EOL;
+                    echo "data: " . json_encode(['response' => $pronun_score]) . "\n\n";
+                    flush(); // Flush data to the browser after each file is processed
+                }
+
                 if ($stream_to_frontend === 'yes') {
                     $lines = explode("<br />", $entry[$field_id]);
                     foreach ($lines as $line) {
@@ -1145,20 +1797,48 @@ function event_stream_openai(WP_REST_Request $request)
                     }
                 }
             } else {
+                $send_data("[FIRST-TIME]");
+                if($end_point == 'whisper'){
+                    // Send File URLs to Frontend Before Sending Whisper Request.
+                    $file_field_id = rgar($feed['meta'], 'whisper_file_field');
+                    $file_urls = rgar($entry, $file_field_id);
+                    $file_urls = json_decode($file_urls, true);
+                    // $audio_urls = gform_get_meta($entry['id'], 'audio_urls');
+                    $send_data(json_encode(['response' => $file_urls]), 'audio_urls');
+                }
                 // All requirements are met; process feed.
-                $returned_entry = writify_make_request($feed, $entry, $form, $stream_to_frontend);
 
+                $returned_entry = writify_make_request($feed, $entry, $form, $stream_to_frontend);
                 // If returned value from the processed feed call is an array containing an id, set the entry to its value.
                 if (is_array($returned_entry)) {
+                    $GWiz_GF_OpenAI_Object->log_debug("Returned Entry After Request: " . print_r($returned_entry,true));
                     $entry = $returned_entry;
+                    // Check if Entry Was for Getting Scores
+                    $request_for_scores = isset($feed['meta']['request_is_for_scores']) ? $feed['meta']['request_is_for_scores'] : 'no'; // Possible Values 'no','grammer_scores','vocab_scores'
+                    if($request_for_scores !== 'no'){
+                        if($request_for_scores == 'grammer_scores'){
+                            $grammer_score = intVal(gform_get_meta($entry['id'], 'grammer_score')) ?? 0;
+                            $send_data(json_encode(['response' => $grammer_score]), 'grammer_score');
+                        }
+                        if($request_for_scores == 'vocab_scores'){
+                            $vocab_score = intVal(gform_get_meta($entry['id'], 'vocab_score')) ?? 0;
+                            $send_data(json_encode(['response' => $vocab_score]), 'vocab_score');
+                        }
+                    }
+                    if($end_point == 'whisper'){
+                        // Send WPM on Frontend
+                        $wpm = gform_get_meta($entry['id'], 'wpm');
+                        $send_data(json_encode(['response' => $wpm]), 'wpm');
+                    }
+
                     // Adding this feed to the list of processed feeds
                     $processed_feeds[] = $feed["id"];
-
-                    // Update the processed_feeds metadata after each feed is processed
+                    // // Update the processed_feeds metadata after each feed is processed
                     $meta[$_slug] = $processed_feeds;
                     gform_update_meta($entry["id"], "processed_feeds", $meta);
-                } else {
-                    //skip
+                }else{
+                    // Send Error On Frontend
+                    $send_data(json_encode(['error' => $returned_entry]), $end_point);
                 }
                 if ($stream_to_frontend === 'yes' | $stream_to_frontend === 'question' | $stream_to_frontend === 'text') {
                     $send_data("[DONE]");
@@ -1186,6 +1866,41 @@ function event_stream_openai(WP_REST_Request $request)
     }
     $send_data("[ALLDONE]");
     die();
+}
+
+function calculateWPM($whisperResponse) {
+    $totalWpm = 0;
+    $responseCount = 0;
+    $wpm = 0;
+
+    foreach ($whisperResponse as $responseObj) {
+        $segments = $responseObj['segments'];
+        $responseWpmTotal = 0;
+        $segmentCount = 0;
+
+        foreach ($segments as $segment) {
+            $start = $segment['start'];
+            $end = $segment['end'];
+            $text = trim($segment['text']);
+
+            $duration = $end - $start; // Duration in seconds
+            $words = count(preg_split('/\s+/', $text)); // Count words
+            $segmentWpm = ($words / ($duration / 60)); // Calculate WPM for the segment
+
+            $responseWpmTotal += $segmentWpm;
+            $segmentCount++;
+        }
+
+        if ($segmentCount > 0) {
+            $totalWpm += ($responseWpmTotal / $segmentCount); // Average WPM per response
+            $responseCount++;
+        }
+    }
+
+    $wpm = $responseCount > 0 ? $totalWpm / $responseCount : 0; // Average WPM across all responses
+    $wpm = floor($wpm);
+
+    return $wpm;
 }
 
 
@@ -1243,4 +1958,231 @@ function writify_chatgpt_writelog($log_data)
     if (function_exists('error_log')) {
         error_log(date("Y-m-d H:i:s") . " - " . $log_data . PHP_EOL, 3, plugin_dir_path(__FILE__) . 'chatgpt_log.txt');
     }
+}
+
+// Add Audio Player Shortcode
+add_shortcode( 'result-page-audio-player', 'render_result_page_audio_player');
+function render_result_page_audio_player(){
+
+    ob_start();
+    ?>
+    <div class="isfp-audio-player">
+        <div class="isfp-controls-handler">
+            <div class="backword isfp-vol-nav" onclick="backwardAudio(5)">
+                <svg width="22" height="25" viewBox="0 0 22 25" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M10.8199 3.88655L12.2977 2.40875C12.4701 2.23635 12.5544 2.01569 12.5544 1.75536C12.5544 1.49504 12.4701 1.27438 12.2977 1.10198L12.2272 1.17254L12.2977 1.10198C12.1253 0.929597 11.9047 0.845312 11.6443 0.845312C11.384 0.845312 11.1634 0.929597 10.991 1.10198L10.991 1.10198L7.97815 4.1148C7.79012 4.30283 7.69305 4.52676 7.69305 4.78239C7.69305 5.03803 7.79012 5.26195 7.97815 5.44998L10.9625 8.43438C11.1506 8.62241 11.3745 8.71947 11.6301 8.71947C11.8858 8.71947 12.1097 8.62241 12.2977 8.43438C12.4858 8.24635 12.5828 8.02243 12.5828 7.76679C12.5828 7.51115 12.4858 7.28723 12.2977 7.0992L10.9904 5.79192H11.3743C13.7166 5.79192 15.6801 6.6105 17.2714 8.2486C18.8634 9.88744 19.6591 11.8755 19.6591 14.2188C19.6591 16.5611 18.8404 18.5489 17.2014 20.1879C15.5623 21.827 13.5746 22.6456 11.2322 22.6456C8.88985 22.6456 6.90213 21.827 5.26308 20.1879C3.62403 18.5489 2.80537 16.5611 2.80537 14.2188C2.80537 13.9483 2.71592 13.7184 2.53448 13.537C2.35305 13.3556 2.12316 13.2661 1.85268 13.2661C1.58221 13.2661 1.35232 13.3556 1.17089 13.537C0.989445 13.7184 0.9 13.9483 0.9 14.2188C0.9 15.6527 1.16774 16.9973 1.70389 18.2515C2.23932 19.504 2.97594 20.5996 3.91369 21.5373C4.85142 22.475 5.947 23.2117 7.1995 23.7471C8.45369 24.2832 9.79829 24.551 11.2322 24.551C12.6661 24.551 14.0107 24.2832 15.2649 23.7471C16.5174 23.2117 17.613 22.475 18.5507 21.5373C19.4885 20.5996 20.2251 19.504 20.7605 18.2515C21.2967 16.9973 21.5644 15.6527 21.5644 14.2188C21.5644 12.7848 21.2967 11.4402 20.7605 10.1861C20.2251 8.93355 19.4885 7.83797 18.5507 6.90024C17.613 5.96251 16.5174 5.22585 15.2649 4.69044C14.0107 4.15429 12.6661 3.88655 11.2322 3.88655H10.8199Z" fill="#26375F" stroke="#26375F" stroke-width="0.2"/>
+                    <path d="M9.61621 15.2451L8.04395 14.8691L8.61133 9.82422H14.2031V11.417H10.2314L9.98535 13.625C10.1175 13.5475 10.318 13.4655 10.5869 13.3789C10.8558 13.2878 11.1566 13.2422 11.4893 13.2422C11.9723 13.2422 12.4007 13.3174 12.7744 13.4678C13.1481 13.6182 13.4648 13.8369 13.7246 14.124C13.9889 14.4111 14.1895 14.762 14.3262 15.1768C14.4629 15.5915 14.5312 16.0609 14.5312 16.585C14.5312 17.027 14.4629 17.4486 14.3262 17.8496C14.1895 18.2461 13.9821 18.6016 13.7041 18.916C13.4261 19.2259 13.0775 19.4697 12.6582 19.6475C12.2389 19.8252 11.7422 19.9141 11.168 19.9141C10.7396 19.9141 10.3249 19.8503 9.92383 19.7227C9.52734 19.5951 9.1696 19.4059 8.85059 19.1553C8.53613 18.9046 8.2832 18.6016 8.0918 18.2461C7.90495 17.8861 7.80697 17.4759 7.79785 17.0156H9.75293C9.78027 17.2982 9.85319 17.542 9.97168 17.7471C10.0947 17.9476 10.2565 18.1025 10.457 18.2119C10.6576 18.3213 10.8923 18.376 11.1611 18.376C11.4118 18.376 11.626 18.3281 11.8037 18.2324C11.9814 18.1367 12.125 18.0046 12.2344 17.8359C12.3438 17.6628 12.4235 17.4622 12.4736 17.2344C12.5283 17.002 12.5557 16.7513 12.5557 16.4824C12.5557 16.2135 12.5238 15.9697 12.46 15.751C12.3962 15.5322 12.2982 15.3431 12.166 15.1836C12.0339 15.0241 11.8652 14.901 11.6602 14.8145C11.4596 14.7279 11.2249 14.6846 10.9561 14.6846C10.5915 14.6846 10.3089 14.7415 10.1084 14.8555C9.91243 14.9694 9.74837 15.0993 9.61621 15.2451Z" fill="#26375F"/>
+                </svg>
+            </div>
+            <div class="isfp-play-toggle" data-playing="false" data-audio="audio-1">
+                <div class="isfp-play-icon">
+                    <svg width="41" height="41" viewBox="0 0 41 41" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M20.4644 40.9453C31.5101 40.9453 40.4644 31.991 40.4644 20.9453C40.4644 9.89962 31.5101 0.945312 20.4644 0.945312C9.41866 0.945312 0.464355 9.89962 0.464355 20.9453C0.464355 31.991 9.41866 40.9453 20.4644 40.9453Z" fill="#26375F"/>
+                        <path d="M16.5 14L26.5 20.5L16.5 27L16.5 14Z" fill="white"/>
+                    </svg>
+                </div>
+                <div class="isfp-pause-icon">
+                    <svg width="41" height="41" viewBox="0 0 41 41" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M20.4644 40.9453C31.5101 40.9453 40.4644 31.991 40.4644 20.9453C40.4644 9.89962 31.5101 0.945312 20.4644 0.945312C9.41866 0.945312 0.464355 9.89962 0.464355 20.9453C0.464355 31.991 9.41866 40.9453 20.4644 40.9453Z" fill="#26375F"/>
+                        <path d="M16.4639 26.9453V14.9453" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M24.4644 26.9453V14.9453" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+            </div>
+            <div class="forward isfp-vol-nav" onclick="forwardAudio(5)">
+                <svg width="22" height="26" viewBox="0 0 22 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M11.1088 3.75667L9.63099 2.27886C9.45857 2.10647 9.37431 1.8858 9.37431 1.62548C9.37431 1.36516 9.45857 1.1445 9.63099 0.972098L9.70154 1.04266L9.63099 0.972096C9.8034 0.799714 10.024 0.71543 10.2844 0.71543C10.5447 0.71543 10.7653 0.799714 10.9377 0.972096L10.9377 0.972101L13.9506 3.98492C14.1386 4.17295 14.2357 4.39687 14.2357 4.65251C14.2357 4.90815 14.1386 5.13207 13.9506 5.3201L10.9662 8.3045C10.7781 8.49252 10.5542 8.58959 10.2986 8.58959C10.0429 8.58959 9.81901 8.49252 9.63099 8.3045C9.44296 8.11647 9.34589 7.89254 9.34589 7.63691C9.34589 7.38127 9.44296 7.15734 9.63099 6.96932L10.9383 5.66204H10.5544C8.21207 5.66204 6.24858 6.48062 4.65732 8.11871C3.06533 9.75756 2.26965 11.7456 2.26965 14.0889C2.26965 16.4313 3.08831 18.419 4.72736 20.058C6.36641 21.6971 8.35413 22.5157 10.6965 22.5157C13.0389 22.5157 15.0266 21.6971 16.6656 20.058C18.3047 18.419 19.1233 16.4313 19.1233 14.0889C19.1233 13.8184 19.2128 13.5885 19.3942 13.4071C19.5757 13.2257 19.8056 13.1362 20.076 13.1362C20.3465 13.1362 20.5764 13.2257 20.7578 13.4071C20.9393 13.5885 21.0287 13.8184 21.0287 14.0889C21.0287 15.5228 20.761 16.8674 20.2248 18.1216C19.6894 19.3741 18.9528 20.4697 18.015 21.4074C17.0773 22.3451 15.9817 23.0818 14.7292 23.6172C13.475 24.1533 12.1304 24.4211 10.6965 24.4211C9.26257 24.4211 7.91797 24.1533 6.66378 23.6172C5.41128 23.0818 4.3157 22.3451 3.37797 21.4074C2.44023 20.4697 1.70358 19.3741 1.16817 18.1216C0.63204 16.8674 0.364281 15.5228 0.364281 14.0889C0.364281 12.655 0.63204 11.3104 1.16817 10.0562C1.70358 8.80367 2.44023 7.70809 3.37797 6.77036C4.3157 5.83262 5.41128 5.09597 6.66378 4.56056C7.91797 4.02441 9.26257 3.75667 10.6965 3.75667H11.1088Z" fill="#26375F" stroke="#26375F" stroke-width="0.2"/>
+                    <path d="M9.08008 15.375L7.50781 14.999L8.0752 9.9541H13.667V11.5469H9.69531L9.44922 13.7549C9.58138 13.6774 9.7819 13.5954 10.0508 13.5088C10.3197 13.4176 10.6204 13.3721 10.9531 13.3721C11.4362 13.3721 11.8646 13.4473 12.2383 13.5977C12.612 13.748 12.9287 13.9668 13.1885 14.2539C13.4528 14.541 13.6533 14.8919 13.79 15.3066C13.9268 15.7214 13.9951 16.1908 13.9951 16.7148C13.9951 17.1569 13.9268 17.5785 13.79 17.9795C13.6533 18.376 13.446 18.7314 13.168 19.0459C12.89 19.3558 12.5413 19.5996 12.1221 19.7773C11.7028 19.9551 11.2061 20.0439 10.6318 20.0439C10.2035 20.0439 9.78874 19.9801 9.3877 19.8525C8.99121 19.7249 8.63346 19.5358 8.31445 19.2852C8 19.0345 7.74707 18.7314 7.55566 18.376C7.36882 18.016 7.27083 17.6058 7.26172 17.1455H9.2168C9.24414 17.4281 9.31706 17.6719 9.43555 17.877C9.55859 18.0775 9.72038 18.2324 9.9209 18.3418C10.1214 18.4512 10.3561 18.5059 10.625 18.5059C10.8757 18.5059 11.0898 18.458 11.2676 18.3623C11.4453 18.2666 11.5889 18.1344 11.6982 17.9658C11.8076 17.7926 11.8874 17.5921 11.9375 17.3643C11.9922 17.1318 12.0195 16.8812 12.0195 16.6123C12.0195 16.3434 11.9876 16.0996 11.9238 15.8809C11.86 15.6621 11.762 15.473 11.6299 15.3135C11.4977 15.154 11.3291 15.0309 11.124 14.9443C10.9235 14.8577 10.6888 14.8145 10.4199 14.8145C10.0553 14.8145 9.77279 14.8714 9.57227 14.9854C9.3763 15.0993 9.21224 15.2292 9.08008 15.375Z" fill="#26375F"/>
+                </svg>
+            </div>
+        </div>
+        <div class="isfp-volumn-handler">
+            <div class="volume">
+                <input type="range" min="0" max="100" value="50" class="volume-range">
+                <div class="icon">
+                    <i class="fa fa-volume-up icon-size" aria-hidden="true"></i>
+                </div>
+                <div class="bar-hoverbox">
+                    <div class="bar">
+                        <div class="bar-fill"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <audio id="audio-1" src=""></audio>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+function check_user_submission_limit( $GWiz_GF_OpenAI_Object, $feed, $entry, $form, $user_id = null ) {
+    // Initialize result array
+    $result = array(
+        'status' => '',
+        'message' => '',
+        'submission_count' => 0,
+        'submission_limit' => 0,
+        'time_period' => ''
+    );
+
+    // Get current user ID if not provided
+    if ( ! $user_id ) {
+        $user_id = get_current_user_id();
+    }
+    $GWiz_GF_OpenAI_Object->log_debug("Step 1: User ID - " . print_r($user_id, true));
+
+    // Get user role(s)
+    $user = get_userdata( $user_id );
+    $user_roles = $user->roles;
+    $role = !empty($user_roles) ? $user_roles[0] : 'subscriber';  // Fallback to 'subscriber'
+    $GWiz_GF_OpenAI_Object->log_debug("Step 2: User Role - " . print_r($role, true));
+
+    // Access dynamically generated field values from $feed['meta']
+    $time_period_value = rgar( $feed['meta'], "rule_time_period_value_$role", 1 );
+    $time_period_unit = rgar( $feed['meta'], "rule_time_period_unit_$role", 'seconds' ); // Changed to seconds from your logs
+    $time_period_type = rgar( $feed['meta'], "rule_limit_time_period_$role", 'day' );
+    $calendar_period_value = rgar( $feed['meta'], "rule_calendar_period_$role", '' );
+    $submission_limit = rgar( $feed['meta'], "rule_submission_limit_$role", 3 );
+    
+    $GWiz_GF_OpenAI_Object->log_debug("Step 3: Time Period and Submission Limit - Time Period Value: $time_period_value, Time Period Unit: $time_period_unit, Submission Limit: $submission_limit");
+
+    // Check if the necessary classes exist
+    if ( class_exists( 'GPLS_RuleTest' ) && class_exists('GPLS_Rule_User') ) {
+
+        // Create GPLS_RuleTest instance
+        $rule_test = new GPLS_RuleTest();
+        $rule_test->form_id = rgar( $form, 'id', 1 );
+        $GWiz_GF_OpenAI_Object->log_debug("Step 4: RuleTest Instance Created - Form ID: {$rule_test->form_id}");
+
+        // Use the load method to set the user-specific rule
+        $user_rule = GPLS_Rule_User::load( array( 'rule_user' => $user_id ) );
+        $rule_test->rules[] = $user_rule;
+        $GWiz_GF_OpenAI_Object->log_debug("Step 5: User Rule Loaded - Query Data: " . print_r($user_rule->query(), true));
+
+        // Time period logic
+        switch ( $time_period_type ) {
+            case 'forever':
+                $rule_test->time_period = array('type' => 'forever');
+                $result['time_period'] = 'Forever';
+                break;
+            case 'calendar_period':
+                $rule_test->time_period = array(
+                    'type'  => 'calendar_period',
+                    'value' => $calendar_period_value
+                );
+                $result['time_period'] = $calendar_period_value;
+                break;
+            case 'time_period':
+                $rule_test->time_period = array(
+                    'type'  => 'time_period',
+                    'value' => $time_period_value,
+                    'unit'  => $time_period_unit
+                );
+                $result['time_period'] = "$time_period_value $time_period_unit";
+                break;
+            default:
+                $rule_test->time_period = array(
+                    'type'  => 'day',
+                    'value' => 1
+                );
+                $result['time_period'] = '1 day';
+                break;
+        }
+
+        $GWiz_GF_OpenAI_Object->log_debug("Step 6: Time Period Configuration: " . print_r($rule_test->time_period, true));
+
+        // Set the submission limit dynamically from the feed
+        $rule_test->limit = $submission_limit;
+        $GWiz_GF_OpenAI_Object->log_debug("Step 7: Submission Limit Set: " . $rule_test->limit);
+
+        // Log rule test object before running
+        $GWiz_GF_OpenAI_Object->log_debug("Before Rule Test Run: " . print_r($rule_test, true));
+
+        // Run the rule test
+        $rule_test->run();
+
+        // Log rule test results after running
+        $GWiz_GF_OpenAI_Object->log_debug("After Rule Test Run: Count - {$rule_test->count}, Failed - " . ($rule_test->failed() ? 'true' : 'false'));
+
+        // Populate result with submission data
+        $result['submission_count'] = $rule_test->count;
+        $result['submission_limit'] = $rule_test->limit;
+
+        // Check submission limit
+        if ( $rule_test->failed() ) {
+            $result['status'] = 'failed';
+            $result['message'] = "Submission limit reached. The user has already submitted {$rule_test->count} entries within {$result['time_period']}.";
+        } else {
+            $result['status'] = 'success';
+            $result['message'] = "The user has submitted {$rule_test->count} entries within {$result['time_period']}, under the limit of {$rule_test->limit}.";
+        }
+    } else {
+        // Class does not exist
+        $result['status'] = 'error';
+        $result['message'] = 'Submission rule class not found.';
+    }
+
+    return $result;
+}
+
+// Result Copy Button on GF Result Page
+add_shortcode( 'result-copy-btn', 'render_result_copy_btn' );
+function render_result_copy_btn(){
+   // Get the protocol (http or https)
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https://" : "http://";
+
+    // Get the host name
+    $host = $_SERVER['HTTP_HOST'];
+
+    // Get the URI (path after the host)
+    $request_uri = $_SERVER['REQUEST_URI'];
+
+    // Combine them to form the full URL
+    $result_page_url = $protocol . $host . $request_uri;
+
+    ob_start();
+    ?>
+    <div class="result-link-wrap">
+        <span class="copy-result-link-trigger" onclick="copyResultLink()" data-link="<?php echo $result_page_url; ?>">
+            <svg width="40" height="28" viewBox="0 0 40 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g clip-path="url(#clip0_2121_9298)">
+                <path class="copy-trigger-svg" d="M23.3333 12H17.3333C16.597 12 16 12.597 16 13.3333V19.3333C16 20.0697 16.597 20.6667 17.3333 20.6667H23.3333C24.0697 20.6667 24.6667 20.0697 24.6667 19.3333V13.3333C24.6667 12.597 24.0697 12 23.3333 12Z" stroke="#26375F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path class="copy-trigger-svg" d="M13.3333 16.0002H12.6666C12.313 16.0002 11.9738 15.8597 11.7238 15.6096C11.4737 15.3596 11.3333 15.0205 11.3333 14.6668V8.66683C11.3333 8.31321 11.4737 7.97407 11.7238 7.72402C11.9738 7.47397 12.313 7.3335 12.6666 7.3335H18.6666C19.0202 7.3335 19.3593 7.47397 19.6094 7.72402C19.8594 7.97407 19.9999 8.31321 19.9999 8.66683V9.3335" stroke="#26375F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </g>
+                <defs>
+                <clipPath id="clip0_2121_9298">
+                <rect width="16" height="16" fill="white" transform="translate(10 6)"/>
+                </clipPath>
+                </defs>
+            </svg>
+        </span>
+        <span class="result-link-button">
+            <?php echo $result_page_url; ?>
+        </span>            
+    </div>
+    <script>
+        function copyResultLink() {
+        // Get the link from the inner text of the clicked element
+        let trigger = this.event.target; // 'this.event' is not necessary in modern browsers
+        let parentWrap = trigger.parentElement;
+        let linkContainer = parentWrap.querySelector('.result-link-button');
+        let link = linkContainer.innerText;
+        // Copy the link to the clipboard
+        navigator.clipboard.writeText(link)
+        .then(() => {
+            // Show a success message or give feedback
+            parentWrap.classList.add('copied');
+            linkContainer.innerText = "Link Copied";
+            setTimeout(function(link,linkContainer){
+                linkContainer.innerText = link;
+                parentWrap.classList.remove('copied');
+            },2000,link,linkContainer);
+        })
+        .catch(err => {
+            console.error('Failed to copy link: ', err);
+        });
+    }
+    </script>
+    <?php
+    return ob_get_clean();
 }
