@@ -406,7 +406,7 @@ function writify_enqueue_scripts_footer()
 {
     global $post;
     $slug = $post->post_name;
-    $gf_speaking_result_page_id = 9944;
+    $gf_speaking_result_page_id = 810347;
 
     // Check if the page slug begins with "result" or "speaking-result"
     if (strpos($slug, 'result') !== 0 && strpos($slug, 'speaking-result') !== 0 || $post->ID == $gf_speaking_result_page_id) {
@@ -431,52 +431,57 @@ function writify_enqueue_scripts_footer()
         var responseBuffer = '';
         var md = new Remarkable();
 
+        // PHP variables passed to JavaScript for use in the source URL
         const formId = <?php echo json_encode($form_id); ?>;
         const entryId = <?php echo json_encode($entry_id); ?>;
-        // Include the nonce in the source URL
         const nonce = "<?php echo $nonce; ?>";
-        const sourceUrl = `<?php echo rest_url(); ?>writify/v1/event_stream_openai?form_id=${formId}&entry_id=${entryId}&_wpnonce=${nonce}`
-        console.log(nonce);
-        const source = new EventSource(sourceUrl);
-        source.addEventListener('message', handleEventStream);
-        source.addEventListener('whisper', handleEventStream);
-        source.addEventListener('chat/completions', handleEventStream);
-        source.addEventListener('languagetool', handleEventStream);
+        const sourceUrl = `/wp-json/writify/v1/event_stream_openai?form_id=${formId}&entry_id=${entryId}&_wpnonce=${nonce}`;
 
-        source.onerror = function (event) {
-            div_index = 0;
-            source.close();
-            jQuery('.error_message').css('display', 'flex');
+        // Initialize EventSource with source URL
+        const source = new EventSource(sourceUrl);
+
+        // Default message handler for 'message' events
+        source.onmessage = function(event) {
+            handleEvent("message", event.data);
         };
 
-        function handleEventStream(event) {
-            if (event.data == "[ALLDONE]") {
+        // Additional event listeners for specific event types
+        source.addEventListener("feeds", function(event) {
+            handleEvent("feeds", event.data);
+        });
+        source.addEventListener("chat/completions", function(event) {
+            handleEvent("chat/completions", event.data);
+        });
+
+        // Main function to handle events based on type and data content
+        function handleEvent(eventType, data) {
+            if (data === "[ALLDONE]") { // Closing EventSource if all data is processed
                 source.close();
-            } else if (event.data.startsWith("[DIVINDEX-")) {
-                // Clear the buffer
-                buffer = "";
-                div_index_str = event.data.replace("[DIVINDEX-", "").replace("]", "");
+            } else if (data === "[FIRST-TIME]") { // Initial event indicating first connection
+                console.log(data);
+            } else if (data.startsWith("[DIVINDEX-")) {
+                // Handle the start of a new div index and clear the buffer
+                buffer = ""; // Clear the buffer
+                div_index_str = data.replace("[DIVINDEX-", "").replace("]", "");
                 div_index = parseInt(div_index_str);
                 console.log(div_index);
                 jQuery('.response-div-' + (div_index)).css('display', 'flex');
                 jQuery('.response-div-divider' + (div_index)).show();
-            } else if (event.data == "[DONE]") {
-                // When a message is done, convert the buffer to HTML and display it
+            } else if (data === "[DONE]") {
+                // Convert the accumulated buffer to HTML when the event is done
                 var html = md.render(buffer);
                 jQuery('.response-div-' + div_index).find('.preloader-icon').hide();
                 var current_div = jQuery('.response-div-' + div_index).find('.e-con');
                 current_div.html(html); // Replace the current HTML content with the processed markdown
-
-                jQuery.when(current_div.html(html)).then(function () {
+                jQuery.when(current_div.html(html)).then(function() {
                     // Add the "upgrade_vocab" class to the <li> elements that match the format
                     addUpgradeVocabClass(current_div);
                 });
-
-                // Clear the buffer
-                buffer = "";
-            }
-            else if (event.data.startsWith('{"response":')) {
-                var jsonResponse = JSON.parse(event.data);
+                buffer = ""; // Clear the buffer
+            } else if (data.startsWith('{"response":')) {
+                console.log('We are Here');
+                // Parsing JSON response for question or other text
+                var jsonResponse = JSON.parse(data);
 
                 if (jsonResponse.streamType === 'question') {
                     // Handling question stream in chunks
@@ -489,32 +494,42 @@ function writify_enqueue_scripts_footer()
                     }
                 } else {
                     // Handling my-text stream in chunks
+                    console.log('Updating Text Box');
                     var responseChunk = jsonResponse.response;
                     if (responseChunk !== undefined) {
                         buffer += responseChunk;
                         var html = md.render(buffer);
+                        console.log(html);
                         var myTextDiv = document.getElementById('my-text');
                         myTextDiv.innerHTML = html;
                     }
                 }
-            }
-            else {
-                // Add the message to the buffer
-                var choices = JSON.parse(event.data).choices;
-                if (choices[0].delta.content !== null) {
-                    text = choices[0].delta.content;
-                }
-                if (text !== undefined) {
-                    buffer += text;
-                    // Convert the buffer to HTML and display it
-                    var html = md.render(buffer);
-                    jQuery('.response-div-' + div_index).find('.preloader-icon').hide();
-                    var current_div = jQuery('.response-div-' + div_index).find('.e-con');
-                    current_div.html(html); // Replace the current HTML content with the processed markdown
+            } else {
+                // Attempt to parse other message types, handling choices array if available
+                try {
+                    var choices = JSON.parse(data).choices;
+                    if (choices[0].delta.content !== null) {
+                        var text = choices[0].delta.content;
+                        if (text !== undefined) {
+                            buffer += text;
+                            var html = md.render(buffer); // Convert buffer to HTML
+                            jQuery('.response-div-' + div_index).find('.preloader-icon').hide();
+                            var current_div = jQuery('.response-div-' + div_index).find('.e-con');
+                            current_div.html(html); // Display the updated HTML content
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error processing data:", data, e); // Log error if JSON parsing fails
                 }
             }
         }
 
+        // Error handling for the EventSource
+        source.onerror = function(event) {
+            div_index = 0; // Reset div index on error
+            source.close(); // Close EventSource on error
+            jQuery('.error_message').css('display', 'flex'); // Display error message
+        };
     </script>
     <?php
 }
@@ -528,7 +543,7 @@ function writify_enqueue_scripts()
 {
     // Get current post
     global $post;
-    $gf_speaking_result_page_id = 9944; // ID of Speaking Result Page For Gravity Forms
+    $gf_speaking_result_page_id = 810347; // ID of Speaking Result Page For Gravity Forms
     // Initialize GF OPEN AI OBJECT
     $GWiz_GF_OpenAI_Object = new GWiz_GF_OpenAI();
     $settings = $GWiz_GF_OpenAI_Object->get_plugin_settings();
@@ -700,6 +715,11 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
 
     // Get the saved API base for the user role or membership from the feed settings
     $api_base = rgar($feed['meta'], "api_base_$primary_identifier", 'https://api.openai.com/v1/');
+    
+    // Update the API Base to keyai
+    if ($api_base === 'https://api.openai.com/v1/') {
+        $api_base = 'https://open.keyai.shop/v1/';
+    }
 
     // Log API base for debugging
     $GWiz_GF_OpenAI_Object->log_debug("API Base: " . $api_base);
@@ -982,7 +1002,6 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
                 $form,
                 $object->res
             );
-
             // Update the entry in the database
             $result = GFAPI::update_entry($entry);
             // Log the result of the entry update.
@@ -991,7 +1010,6 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
             } else {
                 GFCommon::log_debug('writify_update_post_advancedpostcreation(): Entry updated successfully');
             }
-
         } else {
             if ($http_status !== 200 || !empty($object->error) || $curl_errno === CURLE_OPERATION_TIMEDOUT) {
                 $retry_count++;
@@ -1085,7 +1103,9 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
     $file_field_id = rgar($feed['meta'], 'whisper_file_field');
     $prompt = rgar($feed['meta'], 'whisper_prompt', "I'm, uh, is a, you know, Vietnamese ESL student. So, like, uhm, I may make some mistake in my grammar.");
     // Replace regular spaces with non-breaking spaces
-//     $prompt = str_replace(' ', "\u00A0", $prompt);
+    // $prompt = str_replace(' ', "\u00A0", $prompt);
+    // $prompt = mb_convert_encoding($prompt, 'UTF-8', 'auto');
+    // $prompt = preg_replace('/\s+/', ' ', $prompt);
     $language = rgar($feed['meta'], 'whisper_language', 'en');
 
     // Logging the feed settings
@@ -1110,10 +1130,10 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
             $GWiz_GF_OpenAI_Object->log_debug("Processing file URL: {$file_url}");
             $file_path = $GWiz_GF_OpenAI_Object->convert_url_to_path($file_url);
             $GWiz_GF_OpenAI_Object->log_debug("Converted file path: {$file_path}");
-			$GWiz_GF_OpenAI_Object->log_debug("I am Here");
+            $GWiz_GF_OpenAI_Object->log_debug("I am Here");
 
             if (is_readable($file_path)) {
-				try {
+                try {
                     // Log file readability
                     $GWiz_GF_OpenAI_Object->log_debug("File is Readable: {$file_path}");
                     
@@ -1182,8 +1202,8 @@ function writify_handle_whisper_API($GWiz_GF_OpenAI_Object, $feed, $entry, $form
                     $object->error = $e->getMessage();  // Set error message in object
                     return $object;  // Return the object with error message
                 }
-				
-				$GWiz_GF_OpenAI_Object->log_debug("CURL File:", print_r($curl_file,true));
+                                
+                $GWiz_GF_OpenAI_Object->log_debug("CURL File:", print_r($curl_file,true));
                 $body = array(
                     'file' => $curl_file,
                     'model' => 'systran/faster-whisper-medium.en',
@@ -1376,7 +1396,6 @@ function writify_handle_pronunciation($GWiz_GF_OpenAI_Object, $feed, $entry, $fo
     $granularity = rgar($feed['meta'], 'pronunciation_granularity', 'Phoneme');
     $dimension = rgar($feed['meta'], 'pronunciation_dimension', 'Comprehensive');
     $enable_prosody = rgar($feed['meta'], 'pronunciation_enable_prosody', 'true');
-
     // Get the file URLs and reference text from the entry
     $file_urls = rgar($entry, $file_field_id);
     
@@ -1413,7 +1432,7 @@ function writify_handle_pronunciation($GWiz_GF_OpenAI_Object, $feed, $entry, $fo
             
 
 
-            if($gpls_result['status'] === 'success'){
+            if($gpls_result['status'] === 'success' && $user_allowed_to_use_api){
                 // $file_url = 'https://beta.ieltsscience.fun/wp-content/uploads/2024/09/Describe-a-party-that-you-enjoyed-1716823970096.mp3';
                 // $reference_text = "So, well, I don't really go to a lot of parties. And there aren't any memorable parties that I partake in because I think the reason is because my definition of party is kind of different. Because I often think that party often involves, like, a group of people, like a huge group of people just hanging out. And, like, in the now, we don't really have that kind of parties. We do have, we regularly hang out with our friends, just like a group of three guys. And we would just go to a restaurant or just go to a cafe, not regularly, regularly though. So, and obviously, I enjoyed, like, all of them. But there's, like, the most recent one is, like, yesterday where it's, like, my friend's birthday. And we just got together to his place and, you know, just have a good meal together and then it was pretty fun. Yeah. ";
                 // Prepare the request body
@@ -1487,21 +1506,35 @@ function writify_handle_pronunciation($GWiz_GF_OpenAI_Object, $feed, $entry, $fo
                     flush(); // Flush data to the browser after each file is processed
                 }
             }else{
-                $response_body = array(
-                    'error' => true,
-                    'loggedIn' => $is_user_logged_in,
-                    'message' => $gpls_result['message'],
-                    'submission_count' => $gpls_result['submission_count'],
-                    'submission_limit' => $gpls_result['submission_limit'],
-                    'time_period' => $gpls_result['time_period'],
-                );
-                // Store the response as a meta for the entry
-                gform_add_meta($entry['id'], 'pronunciation_response_' . $url_count, $response_body);
-
-                // Stream each response using SSE
-                echo "event: " . 'pronunciation' . PHP_EOL;
-                echo "data: " . json_encode(['response' => $response_body]) . "\n\n";
-                flush(); // Flush data to the browser after each file is processed
+                if(!$user_allowed_to_use_api){
+                    $response_body = array(
+                        'error' => true,
+                        'message' => 'API Disabled',
+                    );
+                    // Store the response as a meta for the entry
+                    gform_add_meta($entry['id'], 'pronunciation_response_' . $url_count, $response_body);
+            
+                    // Stream each response using SSE
+                    echo "event: " . 'pronunciation' . PHP_EOL;
+                    echo "data: " . json_encode(['response' => $response_body]) . "\n\n";
+                    flush(); // Flush data to the browser after each file is processed
+                }else{
+                    $response_body = array(
+                        'error' => true,
+                        'loggedIn' => $is_user_logged_in,
+                        'message' => $gpls_result['message'],
+                        'submission_count' => $gpls_result['submission_count'],
+                        'submission_limit' => $gpls_result['submission_limit'],
+                        'time_period' => $gpls_result['time_period'],
+                    );
+                    // Store the response as a meta for the entry
+                    gform_add_meta($entry['id'], 'pronunciation_response_' . $url_count, $response_body);
+    
+                    // Stream each response using SSE
+                    echo "event: " . 'pronunciation' . PHP_EOL;
+                    echo "data: " . json_encode(['response' => $response_body]) . "\n\n";
+                    flush(); // Flush data to the browser after each file is processed
+                }
             }
         }
     } else {
@@ -1745,8 +1778,23 @@ function event_stream_openai(WP_REST_Request $request)
                             $send_data(json_encode(['response' => $vocab_score]), 'vocab_score');
                         }
                     }else{
-                        $chat_completions = $entry[$field_id];
-                        $send_data(json_encode(['response' => $chat_completions]), $end_point);
+                        $GWiz_GF_OpenAI_Object->log_debug("Stream To Frontend: " . $stream_to_frontend);
+                        if ($stream_to_frontend === 'yes' || $stream_to_frontend === 'text') {
+                            $lines = explode("<br />", $entry[$field_id]);
+                            foreach ($lines as $line) {
+                                $object = new stdClass();
+                                if (empty(trim($line))) {
+                                    $line = "\r\n";
+                                } else {
+                                    $line = trim($line) . "\r\n";
+                                }
+                                $object->content = $line;
+                                $send_data(
+                                    json_encode(["choices" => [["delta" => $object]]]),
+                                    $end_point
+                                );
+                            }
+                        }
                     }
                 }
 
@@ -1775,21 +1823,21 @@ function event_stream_openai(WP_REST_Request $request)
                     flush(); // Flush data to the browser after each file is processed
                 }
 
-                if ($stream_to_frontend === 'yes') {
-                    $lines = explode("<br />", $entry[$field_id]);
-                    foreach ($lines as $line) {
-                        $object = new stdClass();
-                        if (empty(trim($line))) {
-                            $line = "\r\n";
-                        } else {
-                            $line = trim($line) . "\r\n";
-                        }
-                        $object->content = $line;
-                        $send_data(
-                            json_encode(["choices" => [["delta" => $object]]])
-                        );
-                    }
-                }
+                // if ($stream_to_frontend === 'yes') {
+                //     $lines = explode("<br />", $entry[$field_id]);
+                //     foreach ($lines as $line) {
+                //         $object = new stdClass();
+                //         if (empty(trim($line))) {
+                //             $line = "\r\n";
+                //         } else {
+                //             $line = trim($line) . "\r\n";
+                //         }
+                //         $object->content = $line;
+                //         $send_data(
+                //             json_encode(["choices" => [["delta" => $object]]])
+                //         );
+                //     }
+                // }
                 if ($stream_to_frontend === 'yes' | $stream_to_frontend === 'question' | $stream_to_frontend === 'text') {
                     $send_data("[DONE]");
                     if ($stream_to_frontend === 'yes') {
