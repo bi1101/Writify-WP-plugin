@@ -34,7 +34,11 @@ function processPronunciationData(pronunciationData,fileIndex){
     let userAllowedToUseAPI = false;
     if(response.hasOwnProperty('error') && response.error){
         userAllowedToUseAPI = false
-        removePronunLoader("Auto Pronunciation Checker limit Reached. Click on the mispronounced words manually to generate feedback. Double click to uncheck.");
+        if(response.message == 'API Disabled'){
+            removePronunLoader();
+        }else{
+            removePronunLoader("Auto Pronunciation Checker limit Reached. Click on the mispronounced words manually to generate feedback. Double click to uncheck.");
+        }
     }else{
         userAllowedToUseAPI = true
         removePronunLoader();
@@ -236,7 +240,7 @@ function processSavedPronunData(savedResponses){
                     playSegment(start, end);
             });
             
-            jQuery('.corrected-audio-play-trigger').on('click', function(event) {
+            jQuery('.corrected-audio-play-trigger').off('click').on('click', function(event) {
                 event.stopPropagation();
                 event.target.style.pointerEvents = 'none';
             
@@ -568,7 +572,7 @@ async function markPronunError($word,wrongPhonetics = null, manuallyMarked = tru
                 playSegment(start, end);
         });
         
-        jQuery('.corrected-audio-play-trigger').on('click', function(event) {
+        jQuery('.corrected-audio-play-trigger').off('click').on('click', function(event) {
             event.stopPropagation();
             event.target.style.pointerEvents = 'none';
         

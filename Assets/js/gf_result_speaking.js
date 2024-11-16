@@ -6,12 +6,16 @@ window.onload = function() {
             const scoresCarousel = document.querySelector('#scores-carousel .swiper').swiper;
             const audioPagination = document.getElementById('isfp-audio-pagination');
 
-            transcriptCarousel.allowTouchMove = false;
             resultDataCarousel.allowTouchMove = false;
+            transcriptCarousel.allowTouchMove = false;
+
+            transcriptCarousel.autoHeight = true;
+            resultDataCarousel.autoHeight = true;
 
             transcriptCarousel.on('slideChange', function() {
                 resultDataCarousel.slideTo(transcriptCarousel.activeIndex);
                 scoresCarousel.slideTo(transcriptCarousel.activeIndex);
+                console.log('Adjust Height Triggered');
                 adjustDataHeight(resultDataCarousel);
             });
 
@@ -53,7 +57,7 @@ window.onload = function() {
 
 
             var div_index = 0, div_index_str = '';
-            var chatCompletionsbuffer = ""; // Buffer for holding messages
+            var vocabResponseBuffer = ""; // Buffer for holding messages
             var responseBuffer = '';
             var md = new Remarkable();
 
@@ -212,20 +216,33 @@ window.onload = function() {
                             // resultDataCarousel.slideTo(1);
                         }
                         // There Could be chat/completions events we need to store data in One For All
+                        // Parse the event data to handle both response formats
                         let response = JSON.parse(event.data);
-                        let text = response.response;
-                        if (text !== undefined) {
-                            chatCompletionsbuffer += text;
-                            // console.log(chatCompletionsbuffer);
-                            // Convert the buffer to HTML and display it
-                            let html = md.render(chatCompletionsbuffer);
-                            // console.log(html);
+                        console.log(response);
+                        let vocabSuggestionsText;
+
+                        // Check if response has a direct 'response' property
+                        if (response.response) {
+                            console.log('Response Property Found');
+                            vocabSuggestionsText = response.response;
+                        }
+                        
+                        // Check if response has 'choices' array structure
+                        else if (response.choices && response.choices[0] && response.choices[0].delta && response.choices[0].delta.content) {
+                            vocabSuggestionsText = response.choices[0].delta.content;
+                        }
+
+                        console.log(vocabSuggestionsText);
+
+                        // Now `text` will contain the relevant text content in both cases
+                        if (vocabSuggestionsText) {
+                            
+                            vocabResponseBuffer += vocabSuggestionsText; // Append the extracted text to the buffer
+                            var html = md.render(vocabResponseBuffer); // Convert buffer to HTML
                             jQuery('#vocab-suggestions').find('.preloader-icon').hide();
                             let vocabSuggetsionWrap = jQuery('#vocab-suggestions');
                             vocabSuggetsionWrap.html(html); // Replace the current HTML content with the processed markdown
                         }
-                        // Also Stream The Data on Frontend Live
-                        // Create Transcript Markup On Successfull Completion of All Events
                     }
                     else if(event.type == 'languagetool'){ // Grammer Suggestions Streaming Logic
                         if(eventData.hasOwnProperty('error')){
@@ -611,22 +628,52 @@ window.onload = function() {
                 shareBtn.querySelector('.elementor-button').style.pointerEvents = '';
             }
 
-            function adjustDataHeight(resultDataCarousel){
+            function adjustDataHeight(resultDataCarousel) {
                 let maxHeight = window.innerHeight - 300;
                 let suggestionsParentWrap = document.querySelector('.suggestions-parent-wrap');
                 let activeMistakeContainer = resultDataCarousel.wrapperEl.querySelector('.swiper-slide-active .mistake-container');
-                suggestionsParentWrap.scrollTop = 0;
-                if(activeMistakeContainer.scrollHeight > maxHeight){
-                    // Set overflow y to auto
-                    suggestionsParentWrap.style.setProperty('overflow-y','auto','important');
-                    // Cut Down Container
-                    suggestionsParentWrap.querySelector('.e-n-carousel.swiper').style.setProperty('max-height',`${activeMistakeContainer.scrollHeight}px`,'important');
-                }else{
-                    // set overflow y to hidden
-                    suggestionsParentWrap.style.setProperty('overflow-y','hidden','important');
-                    // Cut Down Container
-                    suggestionsParentWrap.querySelector('.e-n-carousel.swiper').style.setProperty('max-height',`${activeMistakeContainer.scrollHeight}px`,'important');
+            
+                // Log current window and maximum height values
+                console.log(`Current Window Height: ${window.innerHeight}`);
+                console.log(`Max Height for Mistake Container: ${maxHeight}px`);
+                console.log(`Active Mistake Container Scroll Height: ${activeMistakeContainer.scrollHeight}px`);
+            
+                // Log current overflow state before applying changes
+                console.log(`Current Overflow State of suggestionsParentWrap: ${window.getComputedStyle(suggestionsParentWrap).overflowY}`);
+            
+                // Check if the content height exceeds the max allowed height
+                if (activeMistakeContainer.scrollHeight > maxHeight) {
+                    console.log('Applying Overflow: auto (Container height exceeds maxHeight)');
+                    suggestionsParentWrap.style.setProperty('overflow-y', 'auto', 'important');
+                } else {
+                    console.log('Applying Overflow: hidden (Container height is within limits)');
+                    suggestionsParentWrap.style.setProperty('overflow-y', 'hidden', 'important');
                 }
-            }
+            
+                // Get the previous height of the Swiper container
+                let previousHeight = suggestionsParentWrap.querySelector('.e-n-carousel.swiper').offsetHeight;
+            
+                // Calculate the new height
+                let newHeight = activeMistakeContainer.scrollHeight + 20;
+            
+                // Log if the height increased or decreased
+                if (newHeight > previousHeight) {
+                    console.log(`Height of e-n-carousel increased from ${previousHeight}px to ${newHeight}px`);
+                } else if (newHeight < previousHeight) {
+                    console.log(`Height of e-n-carousel decreased from ${previousHeight}px to ${newHeight}px`);
+                } else {
+                    console.log(`Height of e-n-carousel remained the same at ${newHeight}px`);
+                }
+            
+                // Apply the new max height to the Swiper container
+                suggestionsParentWrap.querySelector('.e-n-carousel.swiper').style.setProperty('max-height', `${newHeight}px`, 'important');
+            
+                // Log the final state of the Swiper container after the height change
+                let finalHeight = suggestionsParentWrap.querySelector('.e-n-carousel.swiper').offsetHeight;
+                console.log(`Final Swiper Container Height After Change: ${finalHeight}px`);
+            
+                // Log the element to inspect it if needed
+                console.log(suggestionsParentWrap.querySelector('.e-n-carousel.swiper'));
+            }                        
     });
 };
