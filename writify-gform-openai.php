@@ -592,7 +592,7 @@ function writify_enqueue_scripts()
         }
         // General scripts for pages starting with 'result'
         if (substr($slug, 0, 6) === 'result' && $post->ID != $gf_speaking_result_page_id) {
-            wp_enqueue_script('writify-docx-export', plugin_dir_url(__FILE__) . 'Assets/js/docx_export.js', array('jquery'), '1.1.2', true);
+            wp_enqueue_script('writify-docx-export', plugin_dir_url(__FILE__) . 'Assets/js/docx_export.js', array('jquery'), '1.1.8', true);
             wp_enqueue_script('google-drive-integration', plugin_dir_url(__FILE__) . 'Assets/js/google-drive-export.js', array('google-client', 'google-api', 'writify-docx-export'), time(), true);
         }
 

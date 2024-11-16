@@ -1,7 +1,7 @@
 /**
  * Script Name: Docx Export
- * Version: 1.1.6
- * Last Updated: 29-8-2024
+ * Version: 1.1.8
+ * Last Updated: 31-10-2024
  * Author: bi1101
  * Description: Export the result page as docx files with comments.
  */
@@ -263,7 +263,7 @@ function convertTableToDocx(tableElement) {
     // Create and return the table
     return new docx.Table({
         rows,
-        width: { type: docx.WidthType.AUTO }
+        width: { size: 100, type: docx.WidthType.PERCENTAGE }
     });
 }
 
