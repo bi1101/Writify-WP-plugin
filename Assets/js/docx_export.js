@@ -78,7 +78,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 function convertRawCommentsToDocxFormat(rawComments) {
     // Use the passed user data
-    const authorName = writifyUserData.firstName + ' ' + writifyUserData.lastName || "Teacher";
+    const authorName = writifyUserData.firstName + ' ' + writifyUserData.lastName || "IELTS Science";
 
     return rawComments.map((comment, index) => ({
         id: index,

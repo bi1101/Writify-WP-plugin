@@ -746,9 +746,6 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
     // Parse the merge tags in the message.
     $message = GFCommon::replace_variables($message, $form, $entry, false, false, false, "text");
 
-    // Is Request is Made for Scores?
-     // Possible Values 'no','grammer_scores','vocab_scores'
-    $request_for_scores = isset($feed['meta']['request_is_for_scores']) ? $feed['meta']['request_is_for_scores'] : 'no'; // Possible Values 'no','grammer_scores','vocab_scores'
     GFAPI::add_note(
         $entry["id"],
         0,
@@ -898,7 +895,7 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
 
         $buffer = '';
         
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($request_for_scores, $object, $stream_to_frontend, $GWiz_GF_OpenAI_Object, &$buffer) {
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($object, $stream_to_frontend, $GWiz_GF_OpenAI_Object, &$buffer) {
             $GWiz_GF_OpenAI_Object->log_debug("Raw data received: " . $data);
         
             // Append new data to the buffer
@@ -950,7 +947,7 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
         
                 // Log the processed item
                 $GWiz_GF_OpenAI_Object->log_debug("Processed item: " . json_encode($pop_js));
-                    if($request_for_scores && $request_for_scores == 'no'){
+                    if($stream_to_frontend !== 'grammer_scores' || $stream_to_frontend !== 'vocab_scores'){ // These Values are Handled Saperately
                         if ($stream_to_frontend === 'yes') {
                             echo "event: " . 'chat/completions' . PHP_EOL;
                             echo "data: " . $pop_item . "\n\n";
@@ -967,6 +964,15 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
                             if (!empty($line)) { // Only send non-empty lines
                                 echo "event: " . 'chat/completions' . PHP_EOL;
                                 echo "data: " . json_encode(['response' => $line]) . "\n\n";
+                            }
+                            flush(); // Ensure the data is sent to the client immediately
+                        }
+
+                        // Changed Event Type for Improved Answere
+                        if ($stream_to_frontend === 'improved_answer') {
+                            if (!empty($line)) { // Only send non-empty lines
+                                echo "event: " . 'improved_answer' . PHP_EOL;
+                                echo "data: " . $pop_item . "\n\n";
                             }
                             flush(); // Ensure the data is sent to the client immediately
                         }
@@ -1048,14 +1054,15 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
         }
     } while ($retry);
 
-    if($request_for_scores !== 'no'){
-		$GWiz_GF_OpenAI_Object->log_debug("Request Is For Scores " . $request_for_scores);
+    // Handling Case for Grammer Scores - We Only Want to Send calculated Result. No Extra Data
+    if($stream_to_frontend == 'grammer_scores' || $stream_to_frontend == 'vocab_scores'){
+		$GWiz_GF_OpenAI_Object->log_debug("Request Is For Scores " . $stream_to_frontend);
 		if (file_exists(plugin_dir_path(__FILE__) . 'Includes/merge tags/generated_band_score_merge_tag.php')) {
             require_once plugin_dir_path(__FILE__) . 'Includes/merge tags/generated_band_score_merge_tag.php';
         } else {
             $GWiz_GF_OpenAI_Object->log_debug("File Not Found");
         }
-        if($request_for_scores == 'grammer_scores'){
+        if($stream_to_frontend == 'grammer_scores'){
             $criterion='GRA'; // LR for Lexical Resource (Vocabulary) GRA for Grammar
             $parsedData = parse_field_value($object->res);
             $GWiz_GF_OpenAI_Object->log_debug("Score Parsed Data: " . print_r($parsedData, true));
@@ -1068,7 +1075,7 @@ function writify_handle_chat_completions($GWiz_GF_OpenAI_Object, $feed, $entry, 
                 "grammer_score",
                 $grammer_score
             );
-        }elseif($request_for_scores == 'vocab_scores'){
+        }elseif($stream_to_frontend == 'vocab_scores'){
             $criterion='LR'; // LR for Lexical Resource (Vocabulary) GRA for Grammar
             $parsedData = parse_field_value($object->res);
             $GWiz_GF_OpenAI_Object->log_debug("Score Parsed Data: " . print_r($parsedData, true));
@@ -1745,6 +1752,8 @@ function event_stream_openai(WP_REST_Request $request)
             }
 
             if (in_array((string) $feed["id"], $processed_feeds)) {
+
+                // Processing Saved Data
                 if ($end_point === "whisper") {
                     // Handle Whisper API response
                     // Send Audio URLs To Frontend First
@@ -1766,20 +1775,15 @@ function event_stream_openai(WP_REST_Request $request)
                 }
 
                 if ($end_point === "chat/completions") {
-                    $request_for_scores = isset($feed['meta']['request_is_for_scores']) ? $feed['meta']['request_is_for_scores'] : 'no'; // Possible Values 'no','grammer_scores','vocab_scores'
-					$GWiz_GF_OpenAI_Object->log_debug("Request For Scores: " . $request_for_scores);
-                    if($request_for_scores !== 'no'){
-                        if($request_for_scores == 'grammer_scores'){
-                            $grammer_score = intVal(gform_get_meta($entry['id'], 'grammer_score')) ?? 0;
-                            $send_data(json_encode(['response' => $grammer_score]), 'grammer_score');
-                        }
-                        if($request_for_scores == 'vocab_scores'){
-                            $vocab_score = intVal(gform_get_meta($entry['id'], 'vocab_score')) ?? 0;
-                            $send_data(json_encode(['response' => $vocab_score]), 'vocab_score');
-                        }
+                    if($stream_to_frontend ==='grammer_scores'){
+                        $grammer_score = intVal(gform_get_meta($entry['id'], 'grammer_score')) ?? 0;
+                        $send_data(json_encode(['response' => $grammer_score]), 'grammer_score');
+                    }elseif( $stream_to_frontend ==='vocab_scores'){
+                        $vocab_score = intVal(gform_get_meta($entry['id'], 'vocab_score')) ?? 0;
+                        $send_data(json_encode(['response' => $vocab_score]), 'vocab_score');
                     }else{
                         $GWiz_GF_OpenAI_Object->log_debug("Stream To Frontend: " . $stream_to_frontend);
-                        if ($stream_to_frontend === 'yes' || $stream_to_frontend === 'text') {
+                        if ($stream_to_frontend === 'yes' || $stream_to_frontend === 'text' || $stream_to_frontend === 'improved_answer') {
                             $lines = explode("<br />", $entry[$field_id]);
                             foreach ($lines as $line) {
                                 $object = new stdClass();
@@ -1789,6 +1793,9 @@ function event_stream_openai(WP_REST_Request $request)
                                     $line = trim($line) . "\r\n";
                                 }
                                 $object->content = $line;
+                                // Updating Event Type For Improved Answer
+                                if($stream_to_frontend === 'improved_answer'){ $end_point = 'improved_answer'; }
+                                
                                 $send_data(
                                     json_encode(["choices" => [["delta" => $object]]]),
                                     $end_point
@@ -1822,22 +1829,7 @@ function event_stream_openai(WP_REST_Request $request)
                     echo "data: " . json_encode(['response' => $pronun_score]) . "\n\n";
                     flush(); // Flush data to the browser after each file is processed
                 }
-
-                // if ($stream_to_frontend === 'yes') {
-                //     $lines = explode("<br />", $entry[$field_id]);
-                //     foreach ($lines as $line) {
-                //         $object = new stdClass();
-                //         if (empty(trim($line))) {
-                //             $line = "\r\n";
-                //         } else {
-                //             $line = trim($line) . "\r\n";
-                //         }
-                //         $object->content = $line;
-                //         $send_data(
-                //             json_encode(["choices" => [["delta" => $object]]])
-                //         );
-                //     }
-                // }
+                
                 if ($stream_to_frontend === 'yes' | $stream_to_frontend === 'question' | $stream_to_frontend === 'text') {
                     $send_data("[DONE]");
                     if ($stream_to_frontend === 'yes') {
@@ -1845,6 +1837,7 @@ function event_stream_openai(WP_REST_Request $request)
                     }
                 }
             } else {
+                // Processing New Data 
                 $send_data("[FIRST-TIME]");
                 if($end_point == 'whisper'){
                     // Send File URLs to Frontend Before Sending Whisper Request.
@@ -1861,18 +1854,19 @@ function event_stream_openai(WP_REST_Request $request)
                 if (is_array($returned_entry)) {
                     $GWiz_GF_OpenAI_Object->log_debug("Returned Entry After Request: " . print_r($returned_entry,true));
                     $entry = $returned_entry;
-                    // Check if Entry Was for Getting Scores
-                    $request_for_scores = isset($feed['meta']['request_is_for_scores']) ? $feed['meta']['request_is_for_scores'] : 'no'; // Possible Values 'no','grammer_scores','vocab_scores'
-                    if($request_for_scores !== 'no'){
-                        if($request_for_scores == 'grammer_scores'){
-                            $grammer_score = intVal(gform_get_meta($entry['id'], 'grammer_score')) ?? 0;
-                            $send_data(json_encode(['response' => $grammer_score]), 'grammer_score');
-                        }
-                        if($request_for_scores == 'vocab_scores'){
-                            $vocab_score = intVal(gform_get_meta($entry['id'], 'vocab_score')) ?? 0;
-                            $send_data(json_encode(['response' => $vocab_score]), 'vocab_score');
-                        }
+                    
+                    if('grammer_scores' === $stream_to_frontend){
+                        $grammer_score = intVal(gform_get_meta($entry['id'], 'grammer_score')) ?? 0;
+                        $send_data(json_encode(['response' => $grammer_score]), 'grammer_score');
                     }
+                    
+                    if('vocab_scores' === $stream_to_frontend){
+                        $vocab_score = intVal(gform_get_meta($entry['id'], 'vocab_score')) ?? 0;
+                        $send_data(json_encode(['response' => $vocab_score]), 'vocab_score');
+                    }
+
+
+
                     if($end_point == 'whisper'){
                         // Send WPM on Frontend
                         $wpm = gform_get_meta($entry['id'], 'wpm');

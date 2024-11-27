@@ -54,10 +54,13 @@ window.onload = function() {
             const grammerTranscriptWrap = $('#transcript-carousel .swiper #grammer-transcript-wrap .elementor-widget-container');
             const pronunTranscriptWrap = $('#transcript-carousel .swiper #pronun-transcript-wrap .elementor-widget-container');
             const fluencyTranscriptWrap = $('#transcript-carousel .swiper #fluency-transcript-wrap .elementor-widget-container');
+            const improvedAnswerTranscriptWrap = $('#transcript-carousel .swiper #improved-ans-transcript-wrap .elementor-widget-container');
 
 
             var div_index = 0, div_index_str = '';
-            var vocabResponseBuffer = ""; // Buffer for holding messages
+            var vocabResponseBuffer = ""; // Buffer for holding messages For Vocab
+            var improvedAnswerBuffer = "";
+
             var responseBuffer = '';
             var md = new Remarkable();
 
@@ -79,6 +82,7 @@ window.onload = function() {
             source.addEventListener('vocab_score', handleEventStream);
             source.addEventListener('grammer_score', handleEventStream);
             source.addEventListener('feeds', handleEventStream);
+            source.addEventListener('improved_answer', handleEventStream);
 
             function handleEventStream(event) {
                 let eventData;
@@ -155,6 +159,7 @@ window.onload = function() {
                         jQuery(grammerTranscriptWrap).find('.audio-transcript-section').first().before(formatedResponse);
                         jQuery(pronunTranscriptWrap).find('.audio-transcript-section').first().before(formatedResponse);
                         jQuery(fluencyTranscriptWrap).find('.audio-transcript-section').first().before(formatedResponse);                        
+                        jQuery(improvedAnswerTranscriptWrap).find('.audio-transcript-section').first().before(formatedResponse);                        
 
                         // Add Manual Feedback Option For Pronunciation
                         setupManualFeedback(whisperResponse);
@@ -165,6 +170,7 @@ window.onload = function() {
                             jQuery(grammerTranscriptWrap).find('.audio-transcript-section').remove(); // Empty the Wrapper
                             jQuery(pronunTranscriptWrap).find('.audio-transcript-section').remove(); // Empty the Wrapper
                             jQuery(fluencyTranscriptWrap).find('.audio-transcript-section').remove(); // Empty the Wrapper
+                            jQuery(improvedAnswerTranscriptWrap).find('.audio-transcript-section').remove(); // Empty the Wrapper
                             // Mark Filler Words
                             markFillerWords();
                         }
@@ -264,6 +270,43 @@ window.onload = function() {
                         pronunciationResponse.push(event.data);
                     }else if(event.type == 'fluency_errors'){
                         markFluencyErrors(eventData.response);
+                    }else if(event.type == 'improved_answer'){
+                        // Handle Error 
+                        if(eventData.hasOwnProperty('error')){
+                            alert('Something Went Wrong When Loading Result');
+                            console.log(eventData);
+                            isErrorOccured = true;
+                            return;
+                        }
+
+                        // There Could be chat/completions events we need to store data in One For All
+                        // Parse the event data to handle both response formats
+                        let response = JSON.parse(event.data);
+                        console.log(response);
+                        let improvedAnswerText;
+
+                        // Check if response has a direct 'response' property
+                        if (response.response) {
+                            console.log('Response Property Found');
+                            improvedAnswerText = response.response;
+                        }
+                        
+                        // Check if response has 'choices' array structure
+                        else if (response.choices && response.choices[0] && response.choices[0].delta && response.choices[0].delta.content) {
+                            improvedAnswerText = response.choices[0].delta.content;
+                        }
+
+                        console.log(improvedAnswerText);
+
+                        // Now `text` will contain the relevant text content in both cases
+                        if (improvedAnswerText) {
+                            
+                            improvedAnswerBuffer += improvedAnswerText; // Append the extracted text to the buffer
+                            var html = md.render(improvedAnswerBuffer); // Convert buffer to HTML
+                            jQuery('#improved-ans-wrap').find('.preloader-icon').hide();
+                            let improvedAnswerWrap = jQuery('#improved-ans-wrap');
+                            improvedAnswerWrap.html(html); // Replace the current HTML content with the processed markdown
+                        }
                     }
                     
                 }

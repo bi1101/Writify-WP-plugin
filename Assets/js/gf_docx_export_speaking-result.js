@@ -21,7 +21,7 @@ function createVocabSectionWithComments(rawComments) {
     // Get vocabulary score and prepare heading
     const vocabScore = document.querySelector('#vocab_score_wrap').innerText;
     const headingText = `Vocabulary: ${vocabScore}`;
-    
+
     const sectionChildren = [
         new Paragraph({
             children: [new TextRun(headingText)],
@@ -41,7 +41,7 @@ function createVocabSectionWithComments(rawComments) {
         const fileTitle = fileblock.querySelector('.file-title').innerText;
         sectionChildren.push(
             new Paragraph({
-                children: [new TextRun({text: fileTitle, bold: true})]
+                children: [new TextRun({ text: fileTitle, bold: true })]
             })
         );
 
@@ -128,7 +128,7 @@ function createVocabSectionWithComments(rawComments) {
                 paraChildren.push(new TextRun(transcriptText));
             }
         });
-        
+
         // Push the paragraph with content and comments
         sectionChildren.push(new Paragraph({
             children: paraChildren,
@@ -137,7 +137,7 @@ function createVocabSectionWithComments(rawComments) {
             }
         }));
     });
-    
+
     return sectionChildren;
 }
 
@@ -147,7 +147,7 @@ function createGrammerSectionWithComments(rawComments) {
     // Get grammar score and prepare heading
     const grammerScore = document.querySelector('#grammer_score_wrap').innerText;
     const headingText = `Grammar: ${grammerScore}`;
-    
+
     const sectionChildren = [
         new Paragraph({
             children: [new TextRun(headingText)],
@@ -164,7 +164,7 @@ function createGrammerSectionWithComments(rawComments) {
         const fileTitle = fileblock.querySelector('.file-title').innerText;
         sectionChildren.push(
             new Paragraph({
-                children: [new TextRun({text: fileTitle, bold: true})]
+                children: [new TextRun({ text: fileTitle, bold: true })]
             })
         );
 
@@ -265,7 +265,7 @@ function createPronunSectionWithComments(rawComments) {
     const pronunScore = document.querySelector('#pronun_score_wrap').innerText;
     const headingText = `Pronunciation: ${pronunScore}`;
     console.log(`Pronunciation score heading added: ${headingText}`);
-    
+
     const sectionChildren = [
         new Paragraph({
             children: [new TextRun(headingText)],
@@ -372,6 +372,226 @@ function createPronunSectionWithComments(rawComments) {
     return sectionChildren;
 }
 
+function createNormalSections(elementId) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        console.warn(`No element found with ID: ${elementId}`);
+        return [];
+    }
+
+    const sections = [];
+    element.childNodes.forEach((child) => {
+        if (child.nodeType === 1) {
+            // Check if the node is an element
+            if (child.tagName === "P") {
+                // For paragraph tags
+                sections.push(htmlParagraphToDocx(child.outerHTML));
+            } else if (child.tagName === "OL" || child.tagName === "UL") {
+                // For ordered or unordered lists
+                sections.push(...bulletPointsToDocx(child.outerHTML));
+            } else if (child.tagName === "TABLE") {
+                // For table tags
+                sections.push(convertTableToDocx(child));
+            }
+        }
+    });
+
+    return sections;
+}
+
+function convertTableToDocx(tableElement) {
+    if (!tableElement) {
+        return null;
+    }
+
+    const rows = [];
+
+    // Helper function to create a TableCell
+    const createTableCell = (text, isHeader = false) => {
+        return new docx.TableCell({
+            children: [
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: text,
+                            bold: isHeader, // Bold text for header cells
+                        })
+                    ]
+                })
+            ],
+        });
+    };
+
+    // Helper function to process rows
+    const processRows = (rowElements, isHeader = false) => {
+        return Array.from(rowElements).map((row) => {
+            const cells = Array.from(row.querySelectorAll("th, td")).map((cell) => {
+                const cellText = cell?.innerText?.trim() || "N/A";
+                return createTableCell(cellText, isHeader);
+            });
+            return new docx.TableRow({
+                children: cells,
+                tableHeader: isHeader,
+                cantSplit: true // Prevents row from splitting across pages
+            });
+        });
+    };
+
+    // Process thead rows (header rows)
+    const thead = tableElement.querySelector("thead");
+    if (thead) {
+        const headerRows = processRows(thead.querySelectorAll("tr"), true);
+        rows.push(...headerRows);
+    }
+
+    // Process tbody rows (body rows)
+    const tbody = tableElement.querySelector("tbody") || tableElement;
+    const bodyRows = processRows(tbody.querySelectorAll("tr"));
+    rows.push(...bodyRows);
+
+    // Create and return the table
+    return new docx.Table({
+        rows,
+        width: { size: 100, type: docx.WidthType.PERCENTAGE }
+    });
+}
+
+function htmlParagraphToDocx(htmlContent) {
+    // Convert the HTML string into a DOM element
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = htmlContent;
+
+    const paragraph = tempDiv.querySelector("p");
+    if (!paragraph) {
+        console.warn("No paragraph element found in the provided HTML content.");
+        return;
+    }
+
+    // Use processNodeForFormatting to handle child nodes
+    const children = [];
+    Array.from(paragraph.childNodes).forEach((child) => {
+        children.push(...processNodeForFormatting(child));
+    });
+
+    return new docx.Paragraph({ children });
+}
+
+function processNodeForFormatting(node) {
+    let textRuns = [];
+
+    // Handle text nodes
+    if (node.nodeType === 3) {
+        // Node type 3 is a Text node
+        textRuns.push(new docx.TextRun(node.nodeValue));
+    }
+
+    // Handle element nodes like <strong>, <em>, etc.
+    else if (node.nodeType === 1) {
+        // Node type 1 is an Element node
+        const textContent = node.innerText;
+
+        // Basic formatting options
+        let formattingOptions = {};
+
+        // Check the tag to determine formatting
+        switch (node.tagName) {
+            case "STRONG":
+            case "B":
+                formattingOptions.bold = true;
+                break;
+            case "EM":
+            case "I":
+                formattingOptions.italic = true;
+                break;
+            case "U":
+                formattingOptions.underline = {
+                    color: "auto",
+                    type: docx.UnderlineType.SINGLE
+                };
+                break;
+            // Add cases for other formatting tags as needed
+        }
+
+        // Check for nested formatting
+        if (node.children.length > 0) {
+            Array.from(node.childNodes).forEach((childNode) => {
+                textRuns.push(...processNodeForFormatting(childNode));
+            });
+        } else {
+            textRuns.push(
+                new docx.TextRun({
+                    text: textContent,
+                    ...formattingOptions
+                })
+            );
+        }
+    }
+
+    return textRuns;
+}
+
+function processList(list, level, paragraphs) {
+    Array.from(list.children).forEach((item) => {
+        paragraphs.push(createBulletPointParagraphs(item, level));
+
+        // Process nested lists
+        const nestedList = item.querySelector("ul, ol");
+        if (nestedList) {
+            processList(nestedList, level + 1, paragraphs);
+        }
+    });
+}
+
+function createBulletPointParagraphs(item, level) {
+    let contentTextRuns = [];
+
+    // Check if the item contains a paragraph element
+    const paragraphElement = item.querySelector("p");
+
+    if (paragraphElement) {
+        contentTextRuns = processNodeForFormatting(paragraphElement);
+    } else {
+        Array.from(item.childNodes).forEach((childNode) => {
+            contentTextRuns.push(...processNodeForFormatting(childNode));
+        });
+    }
+
+    return new docx.Paragraph({
+        children: contentTextRuns,
+        bullet: {
+            level: level
+        }
+    });
+}
+
+function bulletPointsToDocx(outerHTML) {
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = outerHTML;
+
+    const docxItems = [];
+
+    // Check whether the provided outerHTML is an ordered or unordered list and process it accordingly
+    const listElement = tempDiv.querySelector("ol, ul");
+    if (listElement) {
+        processList(listElement, 0, docxItems);
+    } else {
+        console.warn(
+            "Provided HTML does not contain a valid list element (ol or ul)."
+        );
+        return [];
+    }
+
+    return docxItems; // Ensure we return the docxItems
+}
+
+function createHeaderParagraph(text) {
+    const { Paragraph, TextRun, HeadingLevel } = docx;
+    return new Paragraph({
+        children: [new TextRun(text)],
+        heading: HeadingLevel.HEADING_1
+    });
+}
+
 function getTextContent(element) {
     let textWithSpaces = '';
 
@@ -389,7 +609,7 @@ function getTextContent(element) {
     return textWithSpaces.trim();
 }
 
-function createFluencySection(){
+function createFluencySection() {
     const { Paragraph, TextRun, HeadingLevel } = docx;
     let score = document.querySelector('#fluency_score_wrap').innerText;
     let headingText = `Fluency: ${score}`;
@@ -407,13 +627,13 @@ function createFluencySection(){
         text: '_',
         color: '#ffc000'
     });
-    if(parseInt(wpm) < 120){
+    if (parseInt(wpm) < 120) {
         // Red if less then 120
         wpmColor = '#FF4949';
-    }else if(parseInt(wpm) > 180){
+    } else if (parseInt(wpm) > 180) {
         // Orange if greater then 180
         wpmColor = '#FF822E';
-    }else{
+    } else {
         // Green if between 120 and 180
         wpmColor = '#13CE66';
     }
@@ -469,7 +689,7 @@ function createFluencySection(){
         const fileTitle = fileblock.querySelector('.file-title').innerText;
         sectionChildren.push(
             new Paragraph({
-                children: [new TextRun({text: fileTitle, bold: true})]
+                children: [new TextRun({ text: fileTitle, bold: true })]
             })
         );
         const paraChildren = [];
@@ -482,25 +702,25 @@ function createFluencySection(){
             let currentPosition = 0;
             if (errorSpans.length > 0) {
                 // Process each error in the transcript
-                errorSpans.forEach((error,index) => {
+                errorSpans.forEach((error, index) => {
                     let isPauseError = false;
                     let isBadPause = false;
                     let isMissingPause = false;
-                    if(error.classList.contains('pause-error')){
+                    if (error.classList.contains('pause-error')) {
                         isPauseError = true;
-                        if(error.classList.contains('unexpectedbreak-pause')){
+                        if (error.classList.contains('unexpectedbreak-pause')) {
                             isBadPause = true;
-                        }else{
+                        } else {
                             isMissingPause = true;
                         }
                     }
                     let errorText = '';
-                    if(isPauseError){
+                    if (isPauseError) {
                         // Get the index of the pause error span in the transcript text
                         const textWithPlaceholders = getTextWithPlaceholders(transcriptEl);
                         let placeholder = `<<SPAN_${index}>>`;
                         let pauseErrorStartPos = textWithPlaceholders.indexOf(placeholder, currentPosition);
-                        if(index > 0){
+                        if (index > 0) {
                             pauseErrorStartPos = pauseErrorStartPos - (placeholder.length + 1); // +1 for Space
                         }
                         console.log(`Current Position: ${currentPosition} Error Position :${pauseErrorStartPos} in ${textWithPlaceholders}`);
@@ -511,15 +731,15 @@ function createFluencySection(){
                                 console.log(slicedText);
                                 paraChildren.push(new TextRun(slicedText));
                             }
-                            if(isMissingPause){
+                            if (isMissingPause) {
                                 paraChildren.push(missedPause);
-                            }else if(isBadPause){
+                            } else if (isBadPause) {
                                 paraChildren.push(badPause);
                             }
                             // Update current position
                             currentPosition = pauseErrorStartPos;
                         }
-                    }else{
+                    } else {
                         let errorText = error.innerText;
                         console.log(errorText);
                         const fillerWordStartPos = transcriptText.toLowerCase().indexOf(errorText.toLowerCase(), currentPosition);
@@ -547,22 +767,22 @@ function createFluencySection(){
             }
         });
         // Push the paragraph with content and comments
-        sectionChildren.push(new Paragraph({ 
+        sectionChildren.push(new Paragraph({
             children: paraChildren,
             indent: {
                 firstLine: 0, // Set first line indent to 0 to remove any indentation
-             }
+            }
         }));
     });
     return sectionChildren;
 }
 
-function getTranscriptText(){
+function getTranscriptText() {
     let text = '';
     let fileBlocks = document.querySelectorAll('#vocab-transcript-wrap .file-block');
     fileBlocks.forEach(fileBlock => {
         let transcriptEntries = fileBlock.querySelectorAll('.transcript-entry .transcript-text');
-        transcriptEntries.forEach(transcriptHTML =>{
+        transcriptEntries.forEach(transcriptHTML => {
             text += transcriptHTML.textContent + '\n';
         });
 
@@ -756,12 +976,12 @@ function getRawPronunComments() {
 
 
 
-function convertVocabCommentstoDocxFormat(rawComments){
+function convertVocabCommentstoDocxFormat(rawComments) {
     // Use the passed user data
-    const authorName = writifyUserData.firstName + ' ' + writifyUserData.lastName || "Teacher";
+    const authorName = writifyUserData.firstName + ' ' + writifyUserData.lastName || "IELTS Science";
     return rawComments.map((comment, index) => ({
         id: comment.commentCounter,
-        author: authorName.trim() ?? 'Teacher', // Replaced "Teacher" with the user's name
+        author: authorName.trim() ?? 'IELTS Science', // Replaced "Teacher" with the user's name
         date: new Date(),
         children: [
             new docx.Paragraph({
@@ -783,12 +1003,12 @@ function convertVocabCommentstoDocxFormat(rawComments){
     }));
 }
 
-function convertGrammerCommentstoDocxFormat(rawComments){
+function convertGrammerCommentstoDocxFormat(rawComments) {
     // Use the passed user data
-    const authorName = writifyUserData.firstName + ' ' + writifyUserData.lastName || "Teacher";
+    const authorName = writifyUserData.firstName + ' ' + writifyUserData.lastName || "IELTS Science";
     return rawComments.map((comment, index) => ({
         id: comment.commentCounter,
-        author: authorName.trim() ?? 'Teacher', // Replaced "Teacher" with the user's name
+        author: authorName.trim() ?? 'IELTS Science', // Replaced "Teacher" with the user's name
         date: new Date(),
         children: [
             new docx.Paragraph({
@@ -810,12 +1030,12 @@ function convertGrammerCommentstoDocxFormat(rawComments){
     }));
 }
 
-function convertPronunCommentstoDocxFormat(rawComments){
+function convertPronunCommentstoDocxFormat(rawComments) {
     // Use the passed user data
-    const authorName = writifyUserData.firstName + ' ' + writifyUserData.lastName || "Teacher";
+    const authorName = writifyUserData.firstName + ' ' + writifyUserData.lastName || "IELTS Science";
     return rawComments.map((comment, index) => ({
         id: comment.commentCounter,
-        author: authorName.trim() ?? 'Teacher', // Replaced "Teacher" with the user's name
+        author: authorName.trim() ?? 'IELTS Science', // Replaced "Teacher" with the user's name
         date: new Date(),
         children: [
             new docx.Paragraph({
@@ -841,7 +1061,7 @@ function convertPronunCommentstoDocxFormat(rawComments){
 
 async function exportDocument(saveBlob = true) {
     const customStyles = await fetchStylesXML();
-    
+
     // Vocab comments
     let vocabRawComments = getRawVocabComments();
     let vocabComments = convertVocabCommentstoDocxFormat(vocabRawComments);
@@ -853,15 +1073,18 @@ async function exportDocument(saveBlob = true) {
     let pronunComments = convertPronunCommentstoDocxFormat(pronunRawComments);
 
 
-    let rawComments = [...vocabRawComments,...grammerRawComments,...pronunRawComments];
+    let rawComments = [...vocabRawComments, ...grammerRawComments, ...pronunRawComments];
     console.log(pronunRawComments);
-    let formattedComments = [...vocabComments,...grammerComments,...pronunComments];
+    let formattedComments = [...vocabComments, ...grammerComments, ...pronunComments];
     let sectionChildren = [
         ...createVocabSectionWithComments(vocabRawComments),
         ...createGrammerSectionWithComments(grammerRawComments),
         ...createPronunSectionWithComments(pronunRawComments),
         ...createFluencySection(),
     ];
+
+    sectionChildren.push(createHeaderParagraph('Improved Answer'));
+    sectionChildren.push(...createNormalSections('improved-ans-wrap'));
 
     // console.log(rawComments);
     // console.log(formattedComments);
@@ -871,7 +1094,7 @@ async function exportDocument(saveBlob = true) {
         comments: {
             children: formattedComments
         },
-        
+
         sections: [
             {
                 properties: {},
@@ -882,17 +1105,17 @@ async function exportDocument(saveBlob = true) {
 
     // Convert the document to a blob and save it
     generatedBlob = await docx.Packer.toBlob(doc);
-    if(saveBlob == true){
+    if (saveBlob == true) {
         saveBlobAsDocx(generatedBlob);
     }
 }
 
-    async function getGeneratedBlob() {
-        if(!generatedBlob){
-            await exportDocument(false);
-        }
-        return generatedBlob;
+async function getGeneratedBlob() {
+    if (!generatedBlob) {
+        await exportDocument(false);
     }
+    return generatedBlob;
+}
 
 function createHeading(text) {
     const { Paragraph, TextRun, HeadingLevel } = docx;
@@ -914,7 +1137,7 @@ function saveBlobAsDocx(blob) {
 
 // Function to Export Document
 
-function startDocumentExport(){
+function startDocumentExport() {
     console.log('Document Export Started');
     exportDocument().catch(error => console.error(error));
 }
